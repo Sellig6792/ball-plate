@@ -1,11 +1,10 @@
 mod camera;
 mod utils;
 
-
 use std::fs;
-use std::time::{Duration, Instant};
 use std::sync::mpsc;
 use std::thread;
+use std::time::{Duration, Instant};
 
 use opencv::core::{Mat, Vector};
 use opencv::imgcodecs::imwrite;
@@ -13,9 +12,7 @@ use opencv::imgcodecs::imwrite;
 use camera::Camera;
 use utils::get_circle_points;
 
-
 const RADIUS: Option<i32> = Some(160);
-
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut camera = Camera::init()?;
@@ -44,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         // DETECTION
         if let Some((center, radius)) = camera.get_circle(&frame_mat)? {
-            let circle_points = get_circle_points(center, RADIUS.or(Some(radius)).unwrap());
+            let circle_points = get_circle_points(center, RADIUS.unwrap_or(radius));
             let _ = utils::draw_circle(&mut frame_mat, &circle_points);
 
             // On envoie à la sauvegarde uniquement si on a un cercle

@@ -5,8 +5,8 @@ use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
 use opencv::core::{Mat, Point2f, Scalar, Size, Vector, in_range};
 use opencv::imgcodecs::{IMREAD_COLOR, imdecode};
 use opencv::imgproc::{
-    CHAIN_APPROX_SIMPLE, COLOR_BGR2HSV, RETR_EXTERNAL, cvt_color,
-    find_contours, gaussian_blur, min_enclosing_circle,
+    CHAIN_APPROX_SIMPLE, COLOR_BGR2HSV, RETR_EXTERNAL, cvt_color, find_contours, gaussian_blur,
+    min_enclosing_circle,
 };
 
 pub struct Camera {
