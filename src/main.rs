@@ -7,18 +7,16 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use opencv::core::{Mat, Vector};
+use opencv::core::{Mat, Vector, MatTraitConst};
 use opencv::imgcodecs::imwrite;
 
 use camera::Camera;
 use utils::get_circle_points;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
     let mut camera = Camera::init()?;
     let duration = Duration::from_secs(5);
-    let start = Instant::now();
 
     let output_dir = "./_canny_frames/";
     fs::create_dir_all(output_dir)?;
@@ -33,12 +31,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
+    std::thread::sleep(Duration::from_secs(3));
     println!("Capture en cours (5s)... Appuyez sur 'q' pour quitter.");
+    let start = Instant::now();
+
     let mut count = 0;
     let mut durations = Vec::new();
     while start.elapsed() < duration {
         let start_loop = Instant::now();
         let mut frame_mat = camera.get_frame()?;
+
+        if frame_mat.empty() { continue };
 
         // DETECTION
         if let Some((center, mut radius)) = camera.get_circle(&frame_mat)? {
