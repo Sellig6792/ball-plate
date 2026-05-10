@@ -1,6 +1,7 @@
 mod camera;
 mod utils;
 
+use std::env;
 use std::fs;
 use std::sync::mpsc;
 use std::thread;
@@ -12,9 +13,9 @@ use opencv::imgcodecs::imwrite;
 use camera::Camera;
 use utils::get_circle_points;
 
-const RADIUS: Option<i32> = Some(160);
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    dotenv::dotenv().ok();
+
     let mut camera = Camera::init()?;
     let duration = Duration::from_secs(5);
     let start = Instant::now();
@@ -34,14 +35,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Capture en cours (5s)... Appuyez sur 'q' pour quitter.");
     let mut count = 0;
-
+    let mut durations = Vec::new();
     while start.elapsed() < duration {
         let start_loop = Instant::now();
         let mut frame_mat = camera.get_frame()?;
 
         // DETECTION
-        if let Some((center, radius)) = camera.get_circle(&frame_mat)? {
-            let circle_points = get_circle_points(center, RADIUS.unwrap_or(radius));
+        if let Some((center, mut radius)) = camera.get_circle(&frame_mat)? {
+            match env::var("RADIUS") {
+                Ok(r) => {
+                    radius = r.parse::<i32>().expect("RADIUS must be a number");
+                }
+                _ => {
+                    println!("RADIUS is not set, using computed value: {}", { radius });
+                }
+            }
+            let circle_points = get_circle_points(center, radius);
             let _ = utils::draw_circle(&mut frame_mat, &circle_points);
 
             // On envoie à la sauvegarde uniquement si on a un cercle
@@ -50,8 +59,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             count += 1;
         }
 
-        let duration_loop = start_loop.elapsed();
-        println!("Frame {} - Latence boucle: {:?}", count, duration_loop);
+        durations.push(start_loop.elapsed());
     }
 
     // Fermeture propre
@@ -59,6 +67,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _ = saver_thread.join();
     camera.close()?;
 
-    println!("Fin. {} images sauvegardées.", count);
+    println!("{} images sauvegardées.", count);
+    println!(
+        "Latence moyenne par frame: {:?}",
+        durations.into_iter().sum::<Duration>() / count
+    );
     Ok(())
 }

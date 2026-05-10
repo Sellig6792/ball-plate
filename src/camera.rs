@@ -1,7 +1,9 @@
-use crate::utils::Point;
+use crate::utils::{BallColor, Point, get_ball_color};
 use nokhwa::NokhwaError;
 use nokhwa::pixel_format::LumaFormat;
-use nokhwa::utils::{CameraIndex, RequestedFormat, RequestedFormatType};
+use nokhwa::utils::{
+    CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
+};
 use opencv::core::{Mat, Point2f, Scalar, Size, Vector, in_range};
 use opencv::imgcodecs::{IMREAD_COLOR, imdecode};
 use opencv::imgproc::{
@@ -17,8 +19,9 @@ impl Camera {
     /// Initialise la caméra et ouvre le flux
     pub fn init() -> Result<Self, NokhwaError> {
         let index = CameraIndex::Index(0);
-        let requested =
-            RequestedFormat::new::<LumaFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+        let requested = RequestedFormat::new::<LumaFormat>(RequestedFormatType::Exact(
+            CameraFormat::new(Resolution::new(640, 480), FrameFormat::MJPEG, 15),
+        ));
         let mut camera = nokhwa::Camera::new(index, requested)?;
         camera.open_stream()?;
         Ok(Self { camera })
@@ -41,11 +44,25 @@ impl Camera {
         cvt_color(image_bgr, &mut hsv, COLOR_BGR2HSV, 0)?;
 
         // Plage Orange Fluo :
-        // H (Teinte) : 5 à 22 | S (Saturation) : 150 à 255 | V (Valeur) : 100 à 255
-        let lower_orange = Scalar::new(10.0, 100.0, 30.0, 0.0);
-        let upper_orange = Scalar::new(40.0, 255.0, 240.0, 0.0);
+        const K: f64 = 2.55;
 
-        in_range(&hsv, &lower_orange, &upper_orange, &mut mask)?;
+        let ball_lower_color = get_ball_color(BallColor::Lower);
+        let ball_higher_color = get_ball_color(BallColor::Higher);
+
+        let lower_color = Scalar::new(
+            ball_lower_color.hue() as f64,
+            ball_lower_color.saturation() as f64 * K,
+            ball_lower_color.value() as f64 * K,
+            0.0,
+        );
+        let higher_color = Scalar::new(
+            ball_higher_color.hue() as f64,
+            ball_higher_color.saturation() as f64 * K,
+            ball_higher_color.value() as f64 * K,
+            0.0,
+        );
+
+        in_range(&hsv, &lower_color, &higher_color, &mut mask)?;
         Ok(mask)
     }
 

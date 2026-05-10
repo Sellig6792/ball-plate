@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 nokhwa = { version = "0.10.10", features = ["input-native"]}
 opencv = { version = "0.98.1", features = ["imgproc"] }
-num-traits = "0.2.19"
+easy_color = "0.1.13"
+dotenv = "0.15.0"
