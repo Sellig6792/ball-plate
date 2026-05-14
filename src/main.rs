@@ -1,76 +1,127 @@
+mod app;
 mod camera;
 mod utils;
 
+use crate::app::UserEvent::ChangeImage;
+use crate::app::{App, UserEvent};
+use camera::Camera;
+use opencv::core::Mat;
 use std::env;
 use std::fs;
-use std::sync::mpsc;
-use std::thread;
 use std::time::{Duration, Instant};
-
-use opencv::core::{Mat, Vector};
-use opencv::imgcodecs::imwrite;
-
-use camera::Camera;
+use tokio::sync::mpsc;
 use utils::get_circle_points;
+use winit::event_loop::EventLoop;
 
+// On retire #[tokio::main] du main pour éviter que Winit ne bloque le runtime Tokio
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
-    let mut camera = Camera::init()?;
-    let duration = Duration::from_secs(5);
-    let start = Instant::now();
+    // 1. INITIALISATION DE WINIT (Thread principal)
+    let event_loop: EventLoop<UserEvent> = EventLoop::with_user_event().build()?;
+    let proxy = event_loop.create_proxy();
 
     let output_dir = "./_canny_frames/";
     fs::create_dir_all(output_dir)?;
 
-    // Canal pour la sauvegarde (Path, Image)
-    let (tx, rx) = mpsc::channel::<(String, Mat)>();
+    // 2. DÉMARRAGE DE TOKIO DANS UN THREAD DÉDIÉ
+    // Cela garantit que le runtime reste en vie et ne gèle pas avec run_app
+    std::thread::spawn({
+        let proxy = proxy.clone();
 
-    // THREAD DE SAUVEGARDE (Consommateur)
-    let saver_thread = thread::spawn(move || {
-        while let Ok((path, frame)) = rx.recv() {
-            let _ = imwrite(&path, &frame, &Vector::<i32>::new());
+        move || {
+            let rt = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+                .unwrap();
+
+            rt.block_on(async move {
+                let (tx, mut rx) = mpsc::channel::<Mat>(100);
+
+                // Tâche Async de sauvegarde
+                let update_app = proxy.clone();
+                tokio::spawn(async move {
+                    while let Some(frame) = rx.recv().await {
+                        let proxy_task = update_app.clone();
+
+                        let _ = tokio::task::spawn_blocking(move || {
+                            let _ = proxy_task.send_event(ChangeImage(frame.clone()));
+                        })
+                        .await;
+                    }
+                });
+
+                // Tâche de capture caméra
+                tokio::task::spawn_blocking(move || {
+                    if let Err(e) = run_camera_capture(tx) {
+                        eprintln!("Erreur lors de la capture caméra : {:?}", e);
+                    }
+                })
+                .await
+                .unwrap();
+            });
         }
     });
 
-    println!("Capture en cours (5s)... Appuyez sur 'q' pour quitter.");
+    // 3. LANCEMENT DE L'APPLICATION GRAPHIQUE
+    let mut app = App {
+        window_graphics: None,
+        image_pixels: Vec::new(),
+        img_width: 640,
+        img_height: 480,
+    };
+
+    event_loop.run_app(&mut app)?;
+    Ok(())
+}
+
+fn run_camera_capture(
+    tx: mpsc::Sender<Mat>,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let mut camera = Camera::init()?;
+
+    println!("Capture démarrée en arrière-plan...");
     let mut count = 0;
-    let mut durations = Vec::new();
-    while start.elapsed() < duration {
+
+    let mut last_center: Option<utils::Point> = None;
+    loop {
         let start_loop = Instant::now();
+
         let mut frame_mat = camera.get_frame()?;
 
-        // DETECTION
         if let Some((center, mut radius)) = camera.get_circle(&frame_mat)? {
-            match env::var("RADIUS") {
-                Ok(r) => {
-                    radius = r.parse::<i32>().expect("RADIUS must be a number");
-                }
-                _ => {
-                    println!("RADIUS is not set, using computed value: {}", { radius });
-                }
+            if let Ok(r) = env::var("RADIUS") {
+                radius = r.parse::<i32>().expect("RADIUS must be a number");
             }
-            let circle_points = get_circle_points(center, radius);
-            let _ = utils::draw_circle(&mut frame_mat, &circle_points);
 
-            // On envoie à la sauvegarde uniquement si on a un cercle
-            let file_path = format!("{}/{}.jpg", output_dir, count);
-            tx.send((file_path, frame_mat.clone()))?;
+            let circle_points = get_circle_points(center.clone(), radius);
+            let _ = utils::draw_circle(&mut frame_mat, &circle_points);
+            if let Some(last_center) = last_center {
+                let diff = utils::Point::new(center.x - last_center.x, center.y - last_center.y);
+                let delta_time = start_loop.elapsed().as_secs_f64();
+                let in_a_second = utils::Point::new(
+                    center.x + (diff.x as f64 / delta_time) as i32,
+                    center.y + (diff.y as f64 / delta_time) as i32,
+                );
+
+                let _ = utils::draw_vector(&mut frame_mat, center.clone(), in_a_second);
+            }
+
+            // Si le récepteur est fermé (ex: fermeture de la fenêtre), on arrête proprement
+            if tx.blocking_send(frame_mat.clone()).is_err() {
+                println!("Le récepteur a été fermé. Arrêt de la capture.");
+                break;
+            }
+
+            last_center = Some(center);
             count += 1;
         }
 
-        durations.push(start_loop.elapsed());
+        // Petite pause pour éviter de saturer le CPU et le canal MPSC
+        std::thread::sleep(Duration::from_millis(10));
     }
 
-    // Fermeture propre
-    drop(tx);
-    let _ = saver_thread.join();
-    camera.close()?;
-
-    println!("{} images sauvegardées.", count);
-    println!(
-        "Latence moyenne par frame: {:?}",
-        durations.into_iter().sum::<Duration>() / count
-    );
+    camera.close().expect("Error closing camera");
+    println!("Fin de la capture. {} images traitées.", count);
     Ok(())
 }

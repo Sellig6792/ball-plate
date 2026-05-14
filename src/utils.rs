@@ -1,4 +1,6 @@
 use easy_color::HSV;
+use opencv::core::{Point as CvPoint, Scalar};
+use opencv::imgproc;
 use opencv::Error;
 use opencv::core::{Mat, MatTrait, Vec3b};
 use std::env;
@@ -22,6 +24,38 @@ pub fn draw_circle(edges_map: &mut Mat, circle_points: &Vec<Point>) -> Result<()
         }
         *edges_map.at_2d_mut::<Vec3b>(circle_point.y, circle_point.x)? = Vec3b::from([0, 255, 0]);
     }
+
+    Ok(())
+}
+
+
+pub fn draw_vector(edges_map: &mut Mat, origin: Point, destination: Point) -> Result<(), Error> {
+    // 1. Convert your custom Point to OpenCV's Point
+    let origin_point = CvPoint::new(origin.x, origin.y);
+    let destination_point = CvPoint::new(destination.x, destination.y);
+
+    // 2. Use the built-in line function
+    // Scalar is (B, G, R, A)
+    imgproc::line(
+        edges_map,
+        origin_point,
+        destination_point,
+        Scalar::new(255.0, 255.0, 0.0, 0.0), // Cyan
+        1,                                   //
+        imgproc::LINE_8,                     // Line type
+        0,                                   // Shift (fractional bits)
+    )?;
+
+    // 2. Draw a red circle at the destination point
+    imgproc::circle(
+        edges_map,
+        destination_point,
+        4,
+        Scalar::new(0.0, 0.0, 255.0, 0.0), // Red (BGR)
+        -1,                                // Thickness -1 (fill)
+        imgproc::LINE_AA,                  // Anti-aliasing
+        0,
+    )?;
 
     Ok(())
 }
