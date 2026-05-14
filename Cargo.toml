@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 nokhwa = { version = "0.10.10", features = ["input-native"]}
-opencv = { version = "0.98.1", features = ["clang-runtime","imgproc", "imgcodecs"] }
+opencv = { version = "0.98.1", default-features = false, features = ["clang-runtime", "imgproc", 'imgcodecs'] }
 easy_color = "0.1.13"
 dotenv = "0.15.0"
 winit = { version = "0.30.13", default-features = false, features = ["wayland", "wayland-dlopen", "rwh_06"] }
