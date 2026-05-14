@@ -5,15 +5,13 @@ mod utils;
 use crate::app::UserEvent::ChangeImage;
 use crate::app::{App, UserEvent};
 use camera::Camera;
-use opencv::core::Mat;
+use opencv::core::{Mat, Scalar};
 use std::env;
 use std::fs;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
-use utils::get_circle_points;
 use winit::event_loop::EventLoop;
 
-// On retire #[tokio::main] du main pour éviter que Winit ne bloque le runtime Tokio
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
@@ -75,9 +73,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn run_camera_capture(
-    tx: mpsc::Sender<Mat>,
-) -> Result<(), Box<dyn std::error::Error>> {
+fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::Error>> {
     let mut camera = Camera::init()?;
 
     println!("Capture démarrée en arrière-plan...");
@@ -94,8 +90,13 @@ fn run_camera_capture(
                 radius = r.parse::<i32>().expect("RADIUS must be a number");
             }
 
-            let circle_points = get_circle_points(center.clone(), radius);
-            let _ = utils::draw_circle(&mut frame_mat, &circle_points);
+            let _ = utils::draw_circle(
+                &mut frame_mat,
+                &center,
+                radius,
+                utils::CircleType::Circle,
+                Scalar::new(0.0, 255.0, 0.0, 0.0),
+            );
             if let Some(last_center) = last_center {
                 let diff = utils::Point::new(center.x - last_center.x, center.y - last_center.y);
                 let delta_time = start_loop.elapsed().as_secs_f64();
