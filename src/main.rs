@@ -8,7 +8,7 @@ use camera::Camera;
 use opencv::core::{Mat, Scalar};
 use std::env;
 use std::fs;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 use tokio::sync::mpsc;
 use winit::event_loop::EventLoop;
 
@@ -119,7 +119,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         }
 
         // Petite pause pour éviter de saturer le CPU et le canal MPSC
-        std::thread::sleep(Duration::from_millis(10));
+        // std::thread::sleep(Duration::from_millis(10));
     }
 
     camera.close().expect("Error closing camera");
