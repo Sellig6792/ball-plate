@@ -7,7 +7,6 @@ use crate::app::{App, UserEvent};
 use camera::Camera;
 use opencv::core::{Mat, Scalar};
 use std::env;
-use std::fs;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use winit::event_loop::EventLoop;
@@ -18,9 +17,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. INITIALISATION DE WINIT (Thread principal)
     let event_loop: EventLoop<UserEvent> = EventLoop::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
-
-    let output_dir = "./_canny_frames/";
-    fs::create_dir_all(output_dir)?;
 
     // 2. DÉMARRAGE DE TOKIO DANS UN THREAD DÉDIÉ
     // Cela garantit que le runtime reste en vie et ne gèle pas avec run_app
