@@ -1,4 +1,4 @@
-use crate::utils::{BallColor, Point, get_ball_color};
+use crate::utils::{Point, ball};
 use nokhwa::NokhwaError;
 use nokhwa::pixel_format::LumaFormat;
 use nokhwa::utils::{
@@ -10,6 +10,7 @@ use opencv::imgproc::{
     CHAIN_APPROX_SIMPLE, COLOR_BGR2HSV, RETR_EXTERNAL, cvt_color, find_contours, gaussian_blur,
     min_enclosing_circle,
 };
+use std::env;
 
 pub struct Camera {
     camera: nokhwa::Camera,
@@ -19,9 +20,25 @@ impl Camera {
     /// Initialise la caméra et ouvre le flux
     pub fn init() -> Result<Self, NokhwaError> {
         let index = CameraIndex::Index(0);
+        let frame_rate: u32 = match env::var("FRAME_RATE") {
+            Ok(value) => value.parse::<u32>().expect("FRAME_RATE is not a valid u32"),
+            Err(_) => 20,
+        };
+        let resolution: Resolution = match env::var("RESOLUTION") {
+            Ok(value) => {
+                let vec = value
+                    .split("x")
+                    .map(|x| x.parse::<u32>().expect("RESOLUTION is not a valid u32"))
+                    .collect::<Vec<u32>>();
+                Resolution::new(vec[0], vec[1])
+            }
+            Err(_) => Resolution::new(640, 480),
+        };
+
         let requested = RequestedFormat::new::<LumaFormat>(RequestedFormatType::Exact(
-            CameraFormat::new(Resolution::new(640, 480), FrameFormat::MJPEG, 15),
+            CameraFormat::new(resolution, FrameFormat::MJPEG, frame_rate),
         ));
+        // let requested = RequestedFormat::new::<LumaFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
         let mut camera = nokhwa::Camera::new(index, requested)?;
         camera.open_stream()?;
         Ok(Self { camera })
@@ -46,8 +63,8 @@ impl Camera {
         // Plage Orange Fluo :
         const K: f64 = 2.55;
 
-        let ball_lower_color = get_ball_color(BallColor::Lower);
-        let ball_higher_color = get_ball_color(BallColor::Higher);
+        let ball_lower_color = ball::get_ball_color(ball::BallColor::Lower);
+        let ball_higher_color = ball::get_ball_color(ball::BallColor::Higher);
 
         let lower_color = Scalar::new(
             ball_lower_color.hue() as f64,
