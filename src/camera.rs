@@ -1,4 +1,4 @@
-use crate::utils::{BallColor, Point, get_ball_color};
+use crate::utils::{Point, ball};
 use nokhwa::NokhwaError;
 use nokhwa::pixel_format::LumaFormat;
 use nokhwa::utils::{
@@ -46,8 +46,8 @@ impl Camera {
         // Plage Orange Fluo :
         const K: f64 = 2.55;
 
-        let ball_lower_color = get_ball_color(BallColor::Lower);
-        let ball_higher_color = get_ball_color(BallColor::Higher);
+        let ball_lower_color = ball::get_ball_color(ball::BallColor::Lower);
+        let ball_higher_color = ball::get_ball_color(ball::BallColor::Higher);
 
         let lower_color = Scalar::new(
             ball_lower_color.hue() as f64,

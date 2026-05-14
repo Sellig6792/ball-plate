@@ -90,11 +90,11 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
                 radius = r.parse::<i32>().expect("RADIUS must be a number");
             }
 
-            let _ = utils::draw_circle(
+            let _ = utils::draw::draw_circle(
                 &mut frame_mat,
                 &center,
                 radius,
-                utils::CircleType::Circle,
+                utils::draw::CircleType::Circle,
                 Scalar::new(0.0, 255.0, 0.0, 0.0),
             );
             if let Some(last_center) = last_center {
@@ -105,7 +105,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
                     center.y + (diff.y as f64 / delta_time) as i32,
                 );
 
-                let _ = utils::draw_vector(&mut frame_mat, center.clone(), in_a_second);
+                let _ = utils::draw::draw_vector(&mut frame_mat, center.clone(), in_a_second);
             }
 
             // Si le récepteur est fermé (ex: fermeture de la fenêtre), on arrête proprement

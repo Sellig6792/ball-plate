@@ -1,25 +1,13 @@
-use easy_color::HSV;
 use opencv::Error;
-use opencv::core::Mat;
-use opencv::core::{Point as CvPoint, Scalar};
+use opencv::core::Point as CvPoint;
+use opencv::core::{Mat, Scalar};
 use opencv::imgproc;
-use std::env;
+
+use crate::utils::Point;
 
 pub enum CircleType {
     Circle = 1,
     Point = -1,
-}
-
-#[derive(Debug, Clone)]
-pub struct Point {
-    pub x: i32,
-    pub y: i32,
-}
-
-impl Point {
-    pub fn new(x: i32, y: i32) -> Self {
-        Self { x, y }
-    }
 }
 
 pub fn draw_circle(
@@ -67,22 +55,4 @@ pub fn draw_vector(edges_map: &mut Mat, origin: Point, destination: Point) -> Re
     )?;
 
     Ok(())
-}
-
-pub enum BallColor {
-    Lower,
-    Higher,
-}
-pub fn get_ball_color(ball_color: BallColor) -> HSV {
-    let e = match ball_color {
-        BallColor::Lower => "LOWER",
-        BallColor::Higher => "HIGHER",
-    };
-    match env::var(format!("BALL_{}_COLOR", e)) {
-        Ok(value) => value
-            .as_str()
-            .try_into()
-            .unwrap_or_else(|_| panic!("BALL_{}_COLOR is not a valid HSV value", e)),
-        Err(_) => panic!("BALL_{}_COLOR is not set", e),
-    }
 }
