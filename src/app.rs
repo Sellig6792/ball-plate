@@ -62,7 +62,7 @@ impl ApplicationHandler<UserEvent> for App {
             let size = winit::dpi::PhysicalSize::new(self.img_width, self.img_height);
             let attrs = Window::default_attributes()
                 .with_inner_size(size)
-                .with_title("Wayland Real-time Image Viewer");
+                .with_title("Ball Tracking Visualisation");
 
             let window = Rc::new(event_loop.create_window(attrs).unwrap());
             let context = Context::new(window.clone()).unwrap();

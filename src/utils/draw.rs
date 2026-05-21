@@ -1,5 +1,5 @@
 use opencv::Error;
-use opencv::core::Point as CvPoint;
+use opencv::core::{MatTraitConst, Point as CvPoint, Size};
 use opencv::core::{Mat, Scalar};
 use opencv::imgproc;
 
@@ -55,4 +55,26 @@ pub fn draw_vector(edges_map: &mut Mat, origin: Point, destination: Point) -> Re
     )?;
 
     Ok(())
+}
+
+pub fn upscale_mat(src: &Mat, scale: f64) -> Result<Mat, Error> {
+    // 1. Initialiser la matrice de destination vide
+    let mut dst = Mat::default();
+
+    // 2. Calculer les nouvelles dimensions cibles
+    let new_width = (src.cols() as f64 * scale).round() as i32;
+    let new_height = (src.rows() as f64 * scale).round() as i32;
+    let target_size = Size::new(new_width, new_height);
+
+    // 3. Appliquer le redimensionnement
+    imgproc::resize(
+        src,
+        &mut dst,
+        target_size,
+        0.0,
+        0.0,
+        imgproc::INTER_CUBIC, // Algorithme optimal pour l'agrandissement
+    )?;
+
+    Ok(dst)
 }

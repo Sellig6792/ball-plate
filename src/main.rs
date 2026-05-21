@@ -10,6 +10,7 @@ use std::env;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use winit::event_loop::EventLoop;
+use crate::utils::draw::upscale_mat;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
@@ -39,7 +40,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let proxy_task = update_app.clone();
 
                         let _ = tokio::task::spawn_blocking(move || {
-                            let _ = proxy_task.send_event(ChangeImage(frame.clone()));
+                            let _ = proxy_task.send_event(ChangeImage(upscale_mat(&frame, 2.).expect("COULDNT UPSCALE")));
                         })
                         .await;
                     }
@@ -61,8 +62,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App {
         window_graphics: None,
         image_pixels: Vec::new(),
-        img_width: 640,
-        img_height: 480,
+        img_width: 640 * 2,
+        img_height: 480 * 2,
     };
 
     event_loop.run_app(&mut app)?;
@@ -76,6 +77,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     let mut count = 0;
 
     let mut last_center: Option<utils::Point> = None;
+
     loop {
         let start_loop = Instant::now();
 
@@ -95,6 +97,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             );
             if let Some(last_center) = last_center {
                 let diff = utils::Point::new(center.x - last_center.x, center.y - last_center.y);
+
                 let delta_time = start_loop.elapsed().as_secs_f64();
                 let in_a_second = utils::Point::new(
                     center.x + (diff.x as f64 / delta_time) as i32,
@@ -103,19 +106,17 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
                 let _ = utils::draw::draw_vector(&mut frame_mat, center.clone(), in_a_second);
             }
-
-            // Si le récepteur est fermé (ex: fermeture de la fenêtre), on arrête proprement
-            if tx.blocking_send(frame_mat.clone()).is_err() {
-                println!("Le récepteur a été fermé. Arrêt de la capture.");
-                break;
-            }
-
             last_center = Some(center);
             count += 1;
         }
+        // Si le récepteur est fermé (ex: fermeture de la fenêtre), on arrête proprement
+        if tx.blocking_send(frame_mat.clone()).is_err() {
+            println!("Le récepteur a été fermé. Arrêt de la capture.");
+            break;
+        }
 
         // Petite pause pour éviter de saturer le CPU et le canal MPSC
-        // std::thread::sleep(Duration::from_millis(10));
+        // std::thread::sleep(std::time::Duration::from_millis(50));
     }
 
     camera.close().expect("Error closing camera");
