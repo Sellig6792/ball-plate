@@ -1,6 +1,7 @@
 mod app;
 mod camera;
 mod utils;
+mod pid;
 
 use crate::app::UserEvent::ChangeImage;
 use crate::app::{App, UserEvent};
