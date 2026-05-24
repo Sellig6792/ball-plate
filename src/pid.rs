@@ -1,5 +1,5 @@
-use std::env;
 use dotenv::dotenv;
+use std::env;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Axe {
@@ -15,114 +15,107 @@ pub struct PidConfig {
 }
 
 struct PidState {
-    erreur_precedente: f32,
-    somme_integrale: f32,
+    error_previous: f32,
+    integral_sum: f32,
 }
 
 impl PidState {
     fn new() -> Self {
         Self {
-            erreur_precedente: 0.0,
-            somme_integrale: 0.0,
+            error_previous: 0.0,
+            integral_sum: 0.0,
         }
     }
 }
 
 pub struct BallAndPlatePid {
     config: PidConfig,
-    etat_x: PidState,
-    etat_y: PidState,
-
-    // Coordonnées du centre automatique (en pixels)
-    centre_x_pixel: f32,
-    centre_y_pixel: f32,
-
-    // Ratio pour convertir les pixels en centimètres
-    // (Dépend de la distance de votre caméra)
-    pixels_par_cm: f32,
+    state_x: PidState,
+    state_y: PidState,
+    center_x_pixel: f32,
+    center_y_pixel: f32,
+    pixels_per_cm: f32,
 }
 
 impl BallAndPlatePid {
-    /// Initialise le PID et effectue la calibration du centre
-    /// - `balle_initiale_x` et `balle_initiale_y` : La position en pixels de la balle
-    ///   lorsqu'elle est posée manuellement AU CENTRE de la plaque au démarrage.
-    pub fn from_env(balle_initiale_x: f32, balle_initiale_y: f32) -> Self {
-        dotenv().expect("Impossible de charger le fichier .env");
+    /// Construit le régulateur PID à partir des variables d'environnement globales et manuelles
+    pub fn from_env(center_x_raw: f32, center_y_raw: f32, plate_size_pixel: f32) -> Self {
+        dotenv().ok();
 
-        let kp: f32 = env::var("PID_KP").expect("PID_KP manquant").parse().unwrap();
-        let ki: f32 = env::var("PID_KI").expect("PID_KI manquant").parse().unwrap();
-        let kd: f32 = env::var("PID_KD").expect("PID_KD manquant").parse().unwrap();
-        let fps: f32 = env::var("frame_rate").expect("frame_rate manquant").parse().unwrap();
-
-        // On récupère le facteur d'échelle (combien de pixels représentent 1 cm à l'écran)
-        let pixels_par_cm: f32 = env::var("PIXELS_PAR_CM")
-            .unwrap_or_else(|_| "10.0".to_string()) // Valeur par défaut si non définie
+        let kp: f32 = env::var("PID_KP")
+            .unwrap_or_else(|_| "1.5".to_string())
+            .parse()
+            .unwrap();
+        let ki: f32 = env::var("PID_KI")
+            .unwrap_or_else(|_| "0.0".to_string())
+            .parse()
+            .unwrap();
+        let kd: f32 = env::var("PID_KD")
+            .unwrap_or_else(|_| "0.3".to_string())
+            .parse()
+            .unwrap();
+        let fps: f32 = env::var("FRAME_RATE")
+            .unwrap_or_else(|_| "20".to_string())
             .parse()
             .unwrap();
 
-        println!("--- CALIBRATION DU CENTRE RÉUSSIE ---");
-        println!("Centre enregistré à : X = {}px, Y = {}px", balle_initiale_x, balle_initiale_y);
+        // Dimensions physiques réelles de la plaque de jeu (40x40 cm)
+        let plate_physical_size_cm = 40.0;
+        let pixels_per_cm = plate_size_pixel / plate_physical_size_cm;
 
         Self {
-            config: PidConfig { kp, ki, kd, dt: 1.0 / fps },
-            etat_x: PidState::new(),
-            etat_y: PidState::new(),
-            centre_x_pixel: balle_initiale_x,
-            centre_y_pixel: balle_initiale_y,
-            pixels_par_cm,
+            config: PidConfig {
+                kp,
+                ki,
+                kd,
+                dt: 1.0 / fps,
+            },
+            state_x: PidState::new(),
+            state_y: PidState::new(),
+            center_x_pixel: center_x_raw,
+            center_y_pixel: center_y_raw,
+            pixels_per_cm,
         }
     }
 
-    /// Calcule l'inclinaison de la plaque
-    /// - `axe`: X ou Y
-    /// - `position_balle_pixel`: La coordonnée brute (0 à 640, ou 0 à 1920...) donnée par OpenCV
-    pub fn calculer_inclinaison(&mut self, axe: Axe, position_balle_pixel: f32) -> f32 {
+    /// Calcule la consigne d'inclinaison nécessaire pour corriger la dérive de la bille
+    pub fn calculer_inclinaison(&mut self, axe: Axe, ball_position_pixel: f32) -> f32 {
         let dt = self.config.dt;
 
-        let (etat, centre_pixel) = match axe {
-            Axe::X => (&mut self.etat_x, self.centre_x_pixel),
-            Axe::Y => (&mut self.etat_y, self.centre_y_pixel),
+        let (state, center_pixel) = match axe {
+            Axe::X => (&mut self.state_x, self.center_x_pixel),
+            Axe::Y => (&mut self.state_y, self.center_y_pixel),
         };
 
-        // 1. Calcul de l'écart en pixels par rapport au centre calibré
-        let ecart_pixel = centre_pixel - position_balle_pixel;
+        // Calcul de l'écart spatial en centimètres (inversion de signe automatique selon le côté)
+        let pixel_offset = center_pixel - ball_position_pixel;
+        let error_cm = (pixel_offset / self.pixels_per_cm).clamp(-20.0, 20.0);
 
-        // 2. Conversion de l'erreur en Centimètres (plus logique physiquement pour le PID)
-        // Si la balle est à gauche du centre, l'erreur est positive, si elle est à droite, négative.
-        let erreur_cm = ecart_pixel / self.pixels_par_cm;
+        // 1. Terme Proportionnel (P)
+        let p = self.config.kp * error_cm;
 
-        // Sécurité : On sature l'erreur à la taille max de votre plaque (40cm / 2 = 20cm du centre)
-        let erreur_cm = erreur_cm.clamp(-20.0, 20.0);
-
-        // --- CALCULS DU PID ---
-        // Proportionnel
-        let p = self.config.kp * erreur_cm;
-
-        // Intégral
+        // 2. Terme Intégral (I) avec système de butée (anti-windup)
         if self.config.ki > 0.0 {
-            etat.somme_integrale += erreur_cm * dt;
-            // Limite de l'intégrale à 5cm.s pour éviter l'emballement
-            etat.somme_integrale = etat.somme_integrale.clamp(-5.0, 5.0);
+            state.integral_sum += error_cm * dt;
+            state.integral_sum = state.integral_sum.clamp(-5.0, 5.0);
         }
-        let i = self.config.ki * etat.somme_integrale;
+        let i = self.config.ki * state.integral_sum;
 
-        // Dérivé (Mesure la vitesse de la balle en cm/seconde)
+        // 3. Terme Dérivé (D) basé sur la vitesse de déplacement de la bille
         let d = if dt > 0.0 {
-            self.config.kd * ((erreur_cm - etat.erreur_precedente) / dt)
+            self.config.kd * ((error_cm - state.error_previous) / dt)
         } else {
             0.0
         };
 
-        // Sauvegarde de l'erreur
-        etat.erreur_precedente = erreur_cm;
+        // Sauvegarde de l'erreur courante pour le prochain cycle
+        state.error_previous = error_cm;
 
-        // La commande finale modifie l'angle autour de la position "0.5" (la plaque à plat)
-        // On divise par 100 ou un facteur de gain pour que la sortie reste douce.
-        let commande_pid = (p + i + d) / 100.0;
+        // Normalisation de la sortie du bloc vers un ratio centré autour de 0.5 (plaque plane)
+        let pid_output = (p + i + d) / 100.0;
+        let plate_inclination = 0.5 + pid_output;
 
-        let inclinaison_plaque = 0.5 + commande_pid;
-
-        // Sécurité stricte pour vos servomoteurs (ne penche pas à plus de 30% du max)
-        inclinaison_plaque.clamp(0.2, 0.8)
+        // Limitation physique pour protéger la course mécanique de vos servomoteurs
+        plate_inclination.clamp(0.2, 0.8)
     }
 }

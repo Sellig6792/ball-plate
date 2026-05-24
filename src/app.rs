@@ -60,8 +60,16 @@ impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window_graphics.is_none() {
             // 1. On sécurise avec tes dimensions par défaut (640x480) si l'image n'est pas encore là
-            let init_w = if self.img_width > 0 { self.img_width } else { 640 };
-            let init_h = if self.img_height > 0 { self.img_height } else { 480 };
+            let init_w = if self.img_width > 0 {
+                self.img_width
+            } else {
+                640
+            };
+            let init_h = if self.img_height > 0 {
+                self.img_height
+            } else {
+                480
+            };
 
             // 2. On utilise LogicalSize pour bien s'adapter à l'affichage WSLg / Windows
             let size = winit::dpi::LogicalSize::new(init_w as f64, init_h as f64);

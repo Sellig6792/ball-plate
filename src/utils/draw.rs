@@ -1,6 +1,6 @@
 use opencv::Error;
-use opencv::core::{MatTraitConst, Point as CvPoint, Size};
 use opencv::core::{Mat, Scalar};
+use opencv::core::{MatTraitConst, Point as CvPoint, Size};
 use opencv::imgproc;
 
 use crate::utils::Point;

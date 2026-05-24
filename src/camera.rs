@@ -17,18 +17,23 @@ pub struct Camera {
 }
 
 impl Camera {
-    /// Initialise la caméra et ouvre le flux
+    /// Initialise la caméra avec la résolution et le framerate du fichier .env
     pub fn init() -> Result<Self, NokhwaError> {
         let index = CameraIndex::Index(0);
         let frame_rate: u32 = match env::var("FRAME_RATE") {
-            Ok(value) => value.parse::<u32>().expect("FRAME_RATE is not a valid u32"),
+            Ok(value) => value
+                .parse::<u32>()
+                .expect("FRAME_RATE n'est pas un u32 valide"),
             Err(_) => 20,
         };
         let resolution: Resolution = match env::var("RESOLUTION") {
             Ok(value) => {
                 let vec = value
                     .split("x")
-                    .map(|x| x.parse::<u32>().expect("RESOLUTION is not a valid u32"))
+                    .map(|x| {
+                        x.parse::<u32>()
+                            .expect("RESOLUTION n'est pas un u32 valide")
+                    })
                     .collect::<Vec<u32>>();
                 Resolution::new(vec[0], vec[1])
             }
@@ -38,29 +43,29 @@ impl Camera {
         let requested = RequestedFormat::new::<LumaFormat>(RequestedFormatType::Exact(
             CameraFormat::new(resolution, FrameFormat::MJPEG, frame_rate),
         ));
-        // let requested = RequestedFormat::new::<LumaFormat>(RequestedFormatType::AbsoluteHighestFrameRate);
+
         let mut camera = nokhwa::Camera::new(index, requested)?;
         camera.open_stream()?;
         Ok(Self { camera })
     }
 
-    /// Récupère une image brute en couleur (BGR)
+    /// Récupère l'image brute de la caméra et la décode en Matrice BGR OpenCV
     pub fn get_frame(&mut self) -> Result<Mat, NokhwaError> {
         let frame_buffer = &self.camera.frame()?;
         Ok(imdecode(
-            &Mat::from_slice(frame_buffer.buffer()).expect("Échec lecture buffer"),
+            &Mat::from_slice(frame_buffer.buffer()).expect("Impossible de lire le buffer image"),
             IMREAD_COLOR,
         )
-        .expect("Échec décodage MJPG"))
+        .expect("Échec du décodage du flux MJPEG"))
     }
 
-    /// ÉTAPE 1: Isole l'orange fluo via l'espace HSV
+    /// Isole la couleur de la bille (généralement orange fluo) dans l'espace HSV
     pub fn threshold(image_bgr: &Mat) -> Result<Mat, Box<dyn std::error::Error>> {
         let mut hsv = Mat::default();
         let mut mask = Mat::default();
         cvt_color(image_bgr, &mut hsv, COLOR_BGR2HSV, 0)?;
 
-        // Plage Orange Fluo :
+        // Coefficient de conversion HSV OpenCV (0-100% -> 0-255)
         const K: f64 = 2.55;
 
         let ball_lower_color = ball::get_ball_color(ball::BallColor::Lower);
@@ -83,14 +88,14 @@ impl Camera {
         Ok(mask)
     }
 
-    /// ÉTAPE 2: Lissage pour supprimer le bruit autour de la balle
+    /// Applique un léger flou gaussien pour éliminer le bruit numérique de l'image
     pub fn blur(mask: &Mat) -> Result<Mat, Box<dyn std::error::Error>> {
         let mut blurred = Mat::default();
         gaussian_blur(mask, &mut blurred, Size::new(5, 5), 0., 0., 0)?;
         Ok(blurred)
     }
 
-    /// ÉTAPE 3: Détecte la balle et génère les points d'un cercle parfait
+    /// Analyse les contours pour calculer le centre (X,Y) et le rayon de la bille
     pub fn get_circle(
         &self,
         image_bgr: &Mat,
@@ -110,7 +115,7 @@ impl Camera {
         let mut max_area = 0.0;
         let mut best_contour = None;
 
-        // On cherche le plus gros objet orange
+        // On cherche le plus grand contour correspondant à la couleur de la balle
         for contour in contours.iter() {
             let area = opencv::imgproc::contour_area(&contour, false)?;
             if area > 50.0 && area > max_area {
@@ -124,7 +129,6 @@ impl Camera {
             let mut radius = 0.0;
             let mut hull = Vector::<opencv::core::Point>::new();
             opencv::imgproc::convex_hull(&contour, &mut hull, false, true)?;
-            // On calcule le cercle mathématique qui englobe la forme
             min_enclosing_circle(&hull, &mut center, &mut radius)?;
 
             return Ok(Some((
@@ -135,6 +139,7 @@ impl Camera {
         Ok(None)
     }
 
+    /// Ferme proprement le flux matériel de la caméra
     pub fn close(&mut self) -> Result<(), NokhwaError> {
         self.camera.stop_stream()
     }
