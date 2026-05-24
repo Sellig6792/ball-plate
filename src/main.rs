@@ -12,6 +12,7 @@ use std::time::Instant;
 use tokio::sync::mpsc;
 use winit::event_loop::EventLoop;
 use crate::utils::draw::upscale_mat;
+use opencv::core::MatTraitConst;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
@@ -63,8 +64,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App {
         window_graphics: None,
         image_pixels: Vec::new(),
-        img_width: 640 * 2,
-        img_height: 480 * 2,
+        img_width: 640,
+        img_height: 480,
     };
 
     event_loop.run_app(&mut app)?;
@@ -83,6 +84,10 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         let start_loop = Instant::now();
 
         let mut frame_mat = camera.get_frame()?;
+
+        if frame_mat.empty() {
+            continue;
+        }
 
         if let Some((center, mut radius)) = camera.get_circle(&frame_mat)? {
             if let Ok(r) = env::var("RADIUS") {
@@ -106,6 +111,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
                 );
 
                 let _ = utils::draw::draw_vector(&mut frame_mat, center.clone(), in_a_second);
+                println!("Cercle trouvé {:?}", center)
             }
             last_center = Some(center);
             count += 1;

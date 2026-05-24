@@ -1,4 +1,4 @@
-use opencv::core::{Mat, MatTraitConst, Vec3b};
+use opencv::core::{Mat, MatTraitConst, MatTraitConstManual};
 use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::rc::Rc;
@@ -27,31 +27,31 @@ impl App {
         let width = size.width as u32;
         let height = size.height as u32;
 
-        // 1. Prepare the pixel buffer
-        let mut new_pixels = Vec::with_capacity((width * height) as usize);
+        // 1. On récupère les données brutes sous forme de slice de u8 (très rapide)
+        if let Ok(data) = frame.data_bytes() {
+            // 2. On pré-alloue le vecteur pour éviter les réallocations dynamiques
+            let total_pixels = (width * height) as usize;
+            let mut new_pixels = Vec::with_capacity(total_pixels);
 
-        // 2. Iterate through the Mat and convert BGR to u32 hex
-        // Using at_2d is safe here, but note that OpenCV is usually BGR
-        for y in 0..size.height {
-            for x in 0..size.width {
-                if let Ok(pixel) = frame.at_2d::<Vec3b>(y, x) {
-                    let b = pixel[0] as u32;
-                    let g = pixel[1] as u32;
-                    let r = pixel[2] as u32;
-                    // Format: 0x00RRGGBB
-                    new_pixels.push((r << 16) | (g << 8) | b);
-                }
+            // 3. OpenCV stocke en BGR (3 octets par pixel). On avance de 3 en 3.
+            for chunk in data.chunks_exact(3) {
+                let b = chunk[0] as u32;
+                let g = chunk[1] as u32;
+                let r = chunk[2] as u32;
+
+                // Format Softbuffer : 0x00RRGGBB
+                new_pixels.push((r << 16) | (g << 8) | b);
             }
-        }
 
-        // 3. Update state
-        self.image_pixels = new_pixels;
-        self.img_width = width;
-        self.img_height = height;
+            // 4. Mise à jour de l'état
+            self.image_pixels = new_pixels;
+            self.img_width = width;
+            self.img_height = height;
 
-        // 4. Trigger redraw if the window exists
-        if let Some((window, _)) = &self.window_graphics {
-            window.request_redraw();
+            // 5. Demande de redessiner
+            if let Some((window, _)) = &self.window_graphics {
+                window.request_redraw();
+            }
         }
     }
 }
@@ -59,23 +59,31 @@ impl App {
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window_graphics.is_none() {
-            let size = winit::dpi::PhysicalSize::new(self.img_width, self.img_height);
+            // 1. On sécurise avec tes dimensions par défaut (640x480) si l'image n'est pas encore là
+            let init_w = if self.img_width > 0 { self.img_width } else { 640 };
+            let init_h = if self.img_height > 0 { self.img_height } else { 480 };
+
+            // 2. On utilise LogicalSize pour bien s'adapter à l'affichage WSLg / Windows
+            let size = winit::dpi::LogicalSize::new(init_w as f64, init_h as f64);
+
             let attrs = Window::default_attributes()
                 .with_inner_size(size)
+                // Optionnel : tu peux bloquer le redimensionnement pour être tranquille
+                // .with_resizable(false)
                 .with_title("Ball Tracking Visualisation");
 
             let window = Rc::new(event_loop.create_window(attrs).unwrap());
             let context = Context::new(window.clone()).unwrap();
             let mut surface = Surface::new(&context, window.clone()).unwrap();
 
-            let width = NonZeroU32::new(self.img_width).unwrap();
-            let height = NonZeroU32::new(self.img_height).unwrap();
+            // 3. Initialisation de la surface de dessin avec les mêmes dimensions sécurisées
+            let width = NonZeroU32::new(init_w).unwrap();
+            let height = NonZeroU32::new(init_h).unwrap();
             surface.resize(width, height).unwrap();
 
             self.window_graphics = Some((window, surface));
         }
     }
-
     // Capture de notre événement personnalisé en temps réel
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
