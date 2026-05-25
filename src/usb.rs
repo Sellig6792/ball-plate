@@ -1,4 +1,3 @@
-use crate::pid::Axe;
 use serialport::SerialPort;
 use std::io::Write;
 use std::time::Duration;
@@ -26,14 +25,13 @@ impl UsbController {
         Ok(())
     }
 
-    pub fn send(&mut self, axe: Axe, command: f32) {
+    pub fn send(&mut self, command_x: f32, command_y: f32) {
         // Conversion finale en octet entier (u8)
-        let angle = (command * 180.) as u8;
+        let angle_x = (command_x * 180.) as u8 + 90;
+        let angle_y = (command_y * 180.) as u8 + 90;
+        println!("COMMAND: x: {:.2} y: {:.2}", command_x, command_y);
 
-        let packet: [u8; 3] = match axe {
-            Axe::X => [0xFF, 0x01, angle],
-            Axe::Y => [0xFF, 0x02, angle],
-        };
+        let packet: [u8; 3] = [0xFF, angle_x, angle_y];
 
         if let Err(e) = self.send_bytes(&packet) {
             eprintln!("Erreur lors de l'envoi USB : {:?}", e);

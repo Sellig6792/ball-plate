@@ -160,11 +160,8 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
         println!("PID: X: {:.2} Y: {:.2} ", command_x, command_y);
 
-        // --- ENVOI À L'ARDUINO ---
         if let Some(ref mut arduino) = arduino_o {
-            arduino.send(Axe::X, command_x);
-            arduino.send(Axe::Y, command_y);
-
+            arduino.send(command_x, command_y);
             arduino.println(&mut serial_buffer);
         }
 

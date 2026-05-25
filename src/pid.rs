@@ -3,8 +3,8 @@ use std::env;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Axe {
-    X = 0,
-    Y = 1,
+    X,
+    Y,
 }
 
 pub struct PidConfig {
