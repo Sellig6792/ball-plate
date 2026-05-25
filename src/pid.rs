@@ -12,6 +12,8 @@ pub struct PidConfig {
     pub ki: f32,
     pub kd: f32,
     pub dt: f32,
+    pub invert_x: bool,
+    pub invert_y: bool,
 }
 
 struct PidState {
@@ -28,7 +30,7 @@ impl PidState {
     }
 }
 
-pub struct BallAndPlatePid {
+pub struct Pid {
     config: PidConfig,
     state_x: PidState,
     state_y: PidState,
@@ -37,27 +39,45 @@ pub struct BallAndPlatePid {
     pixels_per_cm: f32,
 }
 
-impl BallAndPlatePid {
+impl Pid {
     /// Construit le régulateur PID à partir des variables d'environnement globales et manuelles
-    pub fn from_env(center_x_raw: f32, center_y_raw: f32, plate_size_pixel: f32) -> Self {
+    pub fn from_env() -> Self {
         dotenv().ok();
 
+        // Récupération stricte des paramètres du PID depuis le fichier .env
         let kp: f32 = env::var("PID_KP")
-            .unwrap_or_else(|_| "1.5".to_string())
+            .expect("The environment variable 'PID_KP' is missing.")
             .parse()
-            .unwrap();
+            .expect("Failed to parse 'PID_KP' into a valid float (f32).");
+
         let ki: f32 = env::var("PID_KI")
-            .unwrap_or_else(|_| "0.0".to_string())
+            .expect("The environment variable 'PID_KI' is missing.")
             .parse()
-            .unwrap();
+            .expect("Failed to parse 'PID_KI' into a valid float (f32).");
+
         let kd: f32 = env::var("PID_KD")
-            .unwrap_or_else(|_| "0.3".to_string())
+            .expect("The environment variable 'PID_KD' is missing.")
             .parse()
-            .unwrap();
+            .expect("Failed to parse 'PID_KD' into a valid float (f32).");
+
         let fps: f32 = env::var("FRAME_RATE")
-            .unwrap_or_else(|_| "20".to_string())
+            .expect("The environment variable 'FRAME_RATE' is missing.")
             .parse()
-            .unwrap();
+            .expect("Failed to parse 'FRAME_RATE' into a valid float (f32).");
+
+        // Récupération des flags d'inversion
+        let invert_x: bool = env::var("INVERT_X")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse()
+            .unwrap_or(false);
+        let invert_y: bool = env::var("INVERT_Y")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse()
+            .unwrap_or(false);
+
+        let center_x_raw = env::var("TARGET_CENTER_X").unwrap().parse().unwrap();
+        let center_y_raw = env::var("TARGET_CENTER_Y").unwrap().parse().unwrap();
+        let plate_size_pixel: f32 = env::var("PLATE_WIDTH_PIXELS").unwrap().parse().unwrap();
 
         // Dimensions physiques réelles de la plaque de jeu (40x40 cm)
         let plate_physical_size_cm = 40.0;
@@ -69,6 +89,8 @@ impl BallAndPlatePid {
                 ki,
                 kd,
                 dt: 1.0 / fps,
+                invert_x,
+                invert_y,
             },
             state_x: PidState::new(),
             state_y: PidState::new(),
@@ -82,13 +104,18 @@ impl BallAndPlatePid {
     pub fn calculer_inclinaison(&mut self, axe: Axe, ball_position_pixel: f32) -> f32 {
         let dt = self.config.dt;
 
-        let (state, center_pixel) = match axe {
-            Axe::X => (&mut self.state_x, self.center_x_pixel),
-            Axe::Y => (&mut self.state_y, self.center_y_pixel),
+        let (state, center_pixel, invert) = match axe {
+            Axe::X => (&mut self.state_x, self.center_x_pixel, self.config.invert_x),
+            Axe::Y => (&mut self.state_y, self.center_y_pixel, self.config.invert_y),
         };
 
-        // Calcul de l'écart spatial en centimètres (inversion de signe automatique selon le côté)
-        let pixel_offset = center_pixel - ball_position_pixel;
+        // Calcul de l'écart spatial en centimètres
+        let mut pixel_offset = center_pixel - ball_position_pixel;
+
+        if invert {
+            pixel_offset = -pixel_offset;
+        }
+
         let error_cm = (pixel_offset / self.pixels_per_cm).clamp(-20.0, 20.0);
 
         // 1. Terme Proportionnel (P)
@@ -112,10 +139,47 @@ impl BallAndPlatePid {
         state.error_previous = error_cm;
 
         // Normalisation de la sortie du bloc vers un ratio centré autour de 0.5 (plaque plane)
-        let pid_output = (p + i + d) / 100.0;
+        let pid_output = (p + i + d) / 60.0;
         let plate_inclination = 0.5 + pid_output;
 
         // Limitation physique pour protéger la course mécanique de vos servomoteurs
-        plate_inclination.clamp(0.2, 0.8)
+        plate_inclination.clamp(0., 1.)
+    }
+
+    pub fn angle_from_height(h: f32) -> Result<u16, String> {
+        if !(0.0..=1.0).contains(&h) {
+            return Err("The normalized height h must be between 0.0 and 1.0.".to_string());
+        }
+
+        let r_str = env::var("ARM_R")
+            .map_err(|_| "The environment variable 'ARM_R' is missing.".to_string())?;
+        let r: f32 = r_str
+            .parse()
+            .map_err(|_| "Failed to parse 'ARM_R' into a valid float (f32).".to_string())?;
+
+        let s_str = env::var("ROD_S")
+            .map_err(|_| "The environment variable 'ROD_S' is missing.".to_string())?;
+        let s: f32 = s_str
+            .parse()
+            .map_err(|_| "Failed to parse 'ROD_S' into a valid float (f32).".to_string())?;
+
+        if s <= r {
+            return Err(
+                "Mechanical error: the rod (S) must be strictly longer than the arm (R)."
+                    .to_string(),
+            );
+        }
+
+        let y = (s - r) + (2.0 * r * h);
+        let argument = (y.powi(2) - s.powi(2) + r.powi(2)) / (2.0 * r * y);
+        let argument_clamped = argument.clamp(-1.0, 1.0);
+
+        let theta_base_rad = argument_clamped.asin();
+        let theta_base_degrees = theta_base_rad.to_degrees();
+
+        // Transformation pour la plage 0° (MIN) à 180° (MAX)
+        let theta_degrees: u16 = (theta_base_degrees + 180.0).round() as u16;
+
+        Ok(theta_degrees)
     }
 }

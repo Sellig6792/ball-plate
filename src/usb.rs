@@ -39,11 +39,34 @@ impl UsbController {
         Ok(())
     }
 
-    pub fn send(&mut self, command_x: f32, command_y: f32) {
-        let command_x = (command_x * 255.0) as u8;
-        let command_y = (command_y * 255.0) as u8;
+    // pub fn send(&mut self, command_x: f32, command_y: f32) {
+    //     let command_x = (command_x * 255.0) as u8;
+    //     let command_y = (command_y * 255.0) as u8;
+    // 
+    //     let packet: [u8; 3] = [0xFF, command_x, command_y];
+    // 
+    //     if let Err(e) = self.send_bytes(&packet) {
+    //         eprintln!("Erreur lors de l'envoi USB : {:?}", e);
+    //     }
+    // }
+    pub fn send(&mut self, angle_x: u16, angle_y: u16) {
+        // Angle is from 0 to 180
+        let high_x = (angle_x >> 8) as u8;
+        let low_x = (angle_x & 0xFF) as u8;
+        let high_y = (angle_y >> 8) as u8;
+        let low_y = (angle_y & 0xFF) as u8;
 
-        let packet: [u8; 3] = [0xFF, command_x, command_y];
+        // Calcul d'une checksum simple (somme des octets)
+        let checksum = high_x.wrapping_add(low_x).wrapping_add(high_y).wrapping_add(low_y);
+
+        let packet: [u8; 6] = [
+            0xFF,       // En-tête unique
+            high_x,
+            low_x,
+            high_y,
+            low_y,
+            checksum,   // Remplace le 0xFE par la sécurité
+        ];
 
         if let Err(e) = self.send_bytes(&packet) {
             eprintln!("Erreur lors de l'envoi USB : {:?}", e);
@@ -70,9 +93,4 @@ impl UsbController {
             }
         }
     }
-}
-
-// Adapt values from 0.2 to 0.8 to values from 0 to 1
-pub fn adjust(value: f32) -> f32 {
-    (value - 0.2) / 0.6
 }

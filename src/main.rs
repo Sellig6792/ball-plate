@@ -1,3 +1,6 @@
+#![feature(core_float_math)]
+extern crate core;
+
 mod app;
 mod camera;
 mod pid;
@@ -6,12 +9,11 @@ mod utils;
 
 use crate::app::UserEvent::ChangeImage;
 use crate::app::{App, UserEvent};
-use crate::usb::adjust;
 use crate::utils::draw::upscale_mat;
 use camera::Camera;
 use opencv::core::MatTraitConst;
 use opencv::core::{Mat, Scalar};
-use pid::{Axe, BallAndPlatePid};
+use pid::{Axe, Pid};
 use std::env;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -86,18 +88,8 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         .parse()?;
 
     let mut arduino = UsbController::new(&usb_port, baud_rate)?;
-
-    let center_x: f32 = env::var("TARGET_CENTER_X")
-        .unwrap_or_else(|_| "320.0".to_string())
-        .parse()?;
-    let center_y: f32 = env::var("TARGET_CENTER_Y")
-        .unwrap_or_else(|_| "240.0".to_string())
-        .parse()?;
-    let plate_width_px: f32 = env::var("PLATE_WIDTH_PIXELS")
-        .unwrap_or_else(|_| "450.0".to_string())
-        .parse()?;
-
-    let mut pid = BallAndPlatePid::from_env(center_x, center_y, plate_width_px);
+    
+    let mut pid = Pid::from_env();
 
     println!("Capture et asservissement démarrés...");
     let mut last_center: Option<utils::Point> = None;
@@ -144,12 +136,15 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             Scalar::new(0.0, 255.0, 0.0, 0.0),
         );
 
-        let command_x = adjust(pid.calculer_inclinaison(Axe::X, center.x as f32));
-        let command_y = adjust(pid.calculer_inclinaison(Axe::Y, center.y as f32));
+        let command_x = pid.calculer_inclinaison(Axe::X, center.x as f32);
+        let command_y = pid.calculer_inclinaison(Axe::Y, center.y as f32);
 
         println!("[PID]     X: {:.2} ; Y: {:.2} ", command_x, command_y);
+        let angle_x = Pid::angle_from_height(command_x)?;
+        let angle_y = Pid::angle_from_height(command_y)?;
 
-        arduino.send(command_x, command_y);
+
+        arduino.send(angle_x, angle_y);
 
         if let Some(last_center_pt) = last_center {
             let dt = start_loop.elapsed().as_secs_f32();
