@@ -3,6 +3,20 @@
 version = 4
 
 [[package]]
+name = "HH-ball-plate"
+version = "0.1.0"
+dependencies = [
+ "dotenv",
+ "easy_color",
+ "nokhwa",
+ "opencv",
+ "serialport",
+ "softbuffer",
+ "tokio",
+ "winit",
+]
+
+[[package]]
 name = "ahash"
 version = "0.8.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1991,20 +2005,6 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
-]
-
-[[package]]
-name = "test-webcam"
-version = "0.1.0"
-dependencies = [
- "dotenv",
- "easy_color",
- "nokhwa",
- "opencv",
- "serialport",
- "softbuffer",
- "tokio",
- "winit",
 ]
 
 [[package]]

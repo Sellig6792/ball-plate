@@ -1,6 +1,3 @@
-#![feature(core_float_math)]
-extern crate core;
-
 mod app;
 mod camera;
 mod pid;
