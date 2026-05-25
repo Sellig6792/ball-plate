@@ -1,3 +1,4 @@
+use crate::pid::Axe;
 use serialport::SerialPort;
 use std::io::Write;
 use std::time::Duration;
@@ -18,17 +19,50 @@ impl UsbController {
         Ok(Self { port })
     }
 
-    /// Envoie une chaîne de caractères (texte) à l'Arduino
-    pub fn send_string(&mut self, data: &str) -> std::io::Result<()> {
-        self.port.write_all(data.as_bytes())?;
-        self.port.flush()?; // Force l'envoi immédiat des données
-        Ok(())
-    }
-
     /// Envoie des octets bruts (pratique pour envoyer des coordonnées de tracking)
     pub fn send_bytes(&mut self, bytes: &[u8]) -> std::io::Result<()> {
         self.port.write_all(bytes)?;
         self.port.flush()?;
         Ok(())
     }
+
+    pub fn send(&mut self, axe: Axe, command: f32) {
+        // Conversion finale en octet entier (u8)
+        let angle = (command * 180.) as u8;
+
+        let packet: [u8; 3] = match axe {
+            Axe::X => [0xFF, 0x01, angle],
+            Axe::Y => [0xFF, 0x02, angle],
+        };
+
+        if let Err(e) = self.send_bytes(&packet) {
+            eprintln!("Erreur lors de l'envoi USB : {:?}", e);
+        }
+    }
+
+    pub fn println(&mut self, serial_buffer: &mut Vec<u8>) {
+        let mut read_buf = [0u8; 64];
+        // On utilise le port sous-jacent pour lire de manière non-bloquante (grâce au timeout bas du UsbController)
+        if let Ok(bytes_read) = self.port.read(&mut read_buf) {
+            if bytes_read == 0 {
+                return;
+            }
+            // On ajoute les octets lus à notre buffer global
+            serial_buffer.extend_from_slice(&read_buf[..bytes_read]);
+
+            // Si on trouve un retour à la ligne '\n', on affiche le message complet
+            if let Some(pos) = serial_buffer.iter().position(|&x| x == b'\n') {
+                let line_bytes = serial_buffer.drain(..=pos).collect::<Vec<u8>>();
+                if let Ok(message) = String::from_utf8(line_bytes) {
+                    // Affiche le message de l'Arduino proprement dans la console Rust
+                    print!("[Arduino] {}", message);
+                }
+            }
+        }
+    }
+}
+
+// Adapt values from 0.2 to 0.8 to values from 0 to 1
+pub fn adjust(value: f32) -> f32 {
+    (value - 0.2) / 0.6
 }

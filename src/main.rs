@@ -6,6 +6,7 @@ mod utils;
 
 use crate::app::UserEvent::ChangeImage;
 use crate::app::{App, UserEvent};
+use crate::usb::adjust;
 use crate::utils::draw::upscale_mat;
 use camera::Camera;
 use opencv::core::MatTraitConst;
@@ -48,7 +49,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 upscale_mat(&frame, 2.).expect("COULDNT UPSCALE"),
                             ));
                         })
-                            .await;
+                        .await;
                     }
                 });
 
@@ -58,8 +59,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         eprintln!("Erreur lors de la capture caméra : {:?}", e);
                     }
                 })
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
             });
         }
     });
@@ -68,8 +69,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App {
         window_graphics: None,
         image_pixels: Vec::new(),
-        img_width: 640,
-        img_height: 480,
+        img_width: 640 * 2,
+        img_height: 480 * 2,
     };
 
     event_loop.run_app(&mut app)?;
@@ -79,13 +80,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::Error>> {
     let mut camera = Camera::init()?;
 
-    let usb_port = env::var("USB_PORT").unwrap_or_else(|_| "/dev/ttyS3".to_string());
+    let usb_port = env::var("USB_PORT").expect("USB_PORT must be set");
     let baud_rate: u32 = env::var("USB_BAUD_RATE")
-        .unwrap_or_else(|_| "115200".to_string())
-        .parse()
-        .unwrap_or(115200);
+        .expect("USB_BAUD_RATE must be set")
+        .parse()?;
 
-    let mut arduino = match UsbController::new(&usb_port, baud_rate) {
+    let mut arduino_o = match UsbController::new(&usb_port, baud_rate) {
         Ok(controller) => {
             println!("Connecté à l'Arduino sur {}", usb_port);
             // Pause essentielle pour laisser l'Arduino finir son auto-reset
@@ -93,98 +93,91 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             Some(controller)
         }
         Err(e) => {
-            eprintln!("Attention : Impossible de se connecter à l'Arduino sur {} ({})", usb_port, e);
+            eprintln!(
+                "Attention : Impossible de se connecter à l'Arduino sur {} ({})",
+                usb_port, e
+            );
             None
         }
     };
 
-    let center_x: f32 = env::var("TARGET_CENTER_X").unwrap_or_else(|_| "320.0".to_string()).parse().unwrap();
-    let center_y: f32 = env::var("TARGET_CENTER_Y").unwrap_or_else(|_| "240.0".to_string()).parse().unwrap();
-    let plate_width_px: f32 = env::var("PLATE_WIDTH_PIXELS").unwrap_or_else(|_| "450.0".to_string()).parse().unwrap();
+    let center_x: f32 = env::var("TARGET_CENTER_X")
+        .unwrap_or_else(|_| "320.0".to_string())
+        .parse()?;
+    let center_y: f32 = env::var("TARGET_CENTER_Y")
+        .unwrap_or_else(|_| "240.0".to_string())
+        .parse()?;
+    let plate_width_px: f32 = env::var("PLATE_WIDTH_PIXELS")
+        .unwrap_or_else(|_| "450.0".to_string())
+        .parse()?;
 
     let mut pid = BallAndPlatePid::from_env(center_x, center_y, plate_width_px);
 
     println!("Capture et asservissement démarrés...");
-    let mut count = 0;
     let mut last_center: Option<utils::Point> = None;
 
     // Buffer pour accumuler les caractères reçus de l'Arduino
     let mut serial_buffer = Vec::new();
 
+    let mut frame_mat = camera.get_frame()?;
+
     loop {
         let start_loop = Instant::now();
-        let mut frame_mat = camera.get_frame()?;
 
         if frame_mat.empty() {
             continue;
-        }
-
-        if let Some((center, mut radius)) = camera.get_circle(&frame_mat)? {
-            if let Ok(r) = env::var("RADIUS") {
-                radius = r.parse::<i32>().expect("RADIUS must be a number");
-            }
-
-            let _ = utils::draw::draw_circle(&mut frame_mat, &center, radius, utils::draw::CircleType::Circle, Scalar::new(0.0, 255.0, 0.0, 0.0));
-
-            let command_x = 1. - pid.calculer_inclinaison(Axe::X, center.x as f32);
-            let command_y = 1. - pid.calculer_inclinaison(Axe::Y, center.y as f32);
-
-            println!("PID: X: {:2} Y: {:2} ", command_x, command_y);
-
-            // --- CONVERSION DE LA SORTIE NORMALISÉE (0.0 à 1.0) EN DEGRÉS (0 à 180) ---
-            // On sature d'abord la commande entre 0.0 et 1.0 par sécurité
-            let command_x_clamped = command_x.clamp(0.0, 1.0);
-
-            // Produit en croix : valeur * 180.0
-            let angle_x_absolu = command_x_clamped * 180.0;
-
-            // --- ENVOI À L'ARDUINO ---
-            if let Some(ref mut port) = arduino {
-                // Conversion finale en octet entier (u8)
-                let angle_x_byte = angle_x_absolu as u8;
-
-                let packet: [u8; 3] = [0xFF, 0x01, angle_x_byte];
-
-                if let Err(e) = port.send_bytes(&packet) {
-                    eprintln!("Erreur lors de l'envoi USB : {:?}", e);
-                }
-
-                // --- NOUVEAU : LECTURE DES MESSAGES DE L'ARDUINO ---
-                // On regarde si l'Arduino a écrit quelque chose dans le buffer série
-                let mut read_buf = [0u8; 64];
-                // On utilise le port sous-jacent pour lire de manière non-bloquante (grâce au timeout bas du UsbController)
-                if let Ok(bytes_read) = port.port.read(&mut read_buf) {
-                    if bytes_read > 0 {
-                        // On ajoute les octets lus à notre buffer global
-                        serial_buffer.extend_from_slice(&read_buf[..bytes_read]);
-
-                        // Si on trouve un retour à la ligne '\n', on affiche le message complet
-                        if let Some(pos) = serial_buffer.iter().position(|&x| x == b'\n') {
-                            let line_bytes = serial_buffer.drain(..=pos).collect::<Vec<u8>>();
-                            if let Ok(message) = String::from_utf8(line_bytes) {
-                                // Affiche le message de l'Arduino proprement dans la console Rust
-                                print!("[Arduino] {}", message);
-                            }
-                        }
-                    }
-                }            }
-
-            if let Some(last_center_pt) = last_center {
-                let diff = utils::Point::new(center.x - last_center_pt.x, center.y - last_center_pt.y);
-                let delta_time = start_loop.elapsed().as_secs_f64();
-                let in_a_second = utils::Point::new(center.x + (diff.x as f64 / delta_time) as i32, center.y + (diff.y as f64 / delta_time) as i32);
-                let _ = utils::draw::draw_vector(&mut frame_mat, center.clone(), in_a_second);
-            }
-            last_center = Some(center);
-            count += 1;
         }
 
         if tx.blocking_send(frame_mat.clone()).is_err() {
             println!("Le récepteur graphique a été fermé. Arrêt de la capture.");
             break;
         }
+        frame_mat = camera.get_frame()?;
+
+        let ball = camera.get_circle(&frame_mat)?;
+        match ball {
+            Some(_) => {}
+            None => continue,
+        }
+        let (center, mut radius) = ball.unwrap();
+
+        if let Ok(defined_radius) = env::var("RADIUS") {
+            radius = defined_radius
+                .parse::<i32>()
+                .expect("RADIUS must be a number");
+        }
+
+        let _ = utils::draw::draw_circle(
+            &mut frame_mat,
+            &center,
+            radius,
+            utils::draw::CircleType::Circle,
+            Scalar::new(0.0, 255.0, 0.0, 0.0),
+        );
+
+        let command_x = adjust(pid.calculer_inclinaison(Axe::X, center.x as f32));
+        let command_y = adjust(pid.calculer_inclinaison(Axe::Y, center.y as f32));
+
+        println!("PID: X: {:.2} Y: {:.2} ", command_x, command_y);
+
+        // --- ENVOI À L'ARDUINO ---
+        if let Some(ref mut arduino) = arduino_o {
+            arduino.send(Axe::X, command_x);
+            arduino.send(Axe::Y, command_y);
+
+            arduino.println(&mut serial_buffer);
+        }
+
+        if let Some(last_center_pt) = last_center {
+            let dt = start_loop.elapsed().as_secs_f32();
+            let in_a_second = utils::computing::in_a_second(last_center_pt, center.clone(), dt);
+            let _ = utils::draw::draw_vector(&mut frame_mat, center.clone(), in_a_second);
+        }
+        last_center = Some(center);
     }
 
-    camera.close().expect("Erreur lors de la fermeture de la caméra");
+    camera
+        .close()
+        .expect("Erreur lors de la fermeture de la caméra");
     Ok(())
 }
