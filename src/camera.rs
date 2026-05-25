@@ -17,28 +17,20 @@ pub struct Camera {
 }
 
 impl Camera {
-    /// Initialise la caméra avec la résolution et le framerate du fichier .env
+    /// Initialize the camera with resolution and framerate from .env file
     pub fn init() -> Result<Self, NokhwaError> {
         let index = CameraIndex::Index(0);
-        let frame_rate: u32 = match env::var("FRAME_RATE") {
-            Ok(value) => value
-                .parse::<u32>()
-                .expect("FRAME_RATE n'est pas un u32 valide"),
-            Err(_) => 20,
-        };
-        let resolution: Resolution = match env::var("RESOLUTION") {
-            Ok(value) => {
-                let vec = value
-                    .split("x")
-                    .map(|x| {
-                        x.parse::<u32>()
-                            .expect("RESOLUTION n'est pas un u32 valide")
-                    })
-                    .collect::<Vec<u32>>();
-                Resolution::new(vec[0], vec[1])
-            }
-            Err(_) => Resolution::new(640, 480),
-        };
+        let frame_rate: u32 = env::var("FRAME_RATE")
+            .expect("FRAME_RATE must be set in .env")
+            .parse()
+            .expect("FRAME_RATE is not a valid u32");
+
+        let res_vec = env::var("RESOLUTION")
+            .expect("RESOLUTION must be set in .env")
+            .split("x")
+            .map(|x| x.parse::<u32>().expect("RESOLUTION is not a valid u32"))
+            .collect::<Vec<u32>>();
+        let resolution = Resolution::new(res_vec[0], res_vec[1]);
 
         let requested = RequestedFormat::new::<LumaFormat>(RequestedFormatType::Exact(
             CameraFormat::new(resolution, FrameFormat::MJPEG, frame_rate),
@@ -49,23 +41,23 @@ impl Camera {
         Ok(Self { camera })
     }
 
-    /// Récupère l'image brute de la caméra et la décode en Matrice BGR OpenCV
+    /// Retrieve raw image from camera and decode it to OpenCV BGR Matrix
     pub fn get_frame(&mut self) -> Result<Mat, NokhwaError> {
         let frame_buffer = &self.camera.frame()?;
         Ok(imdecode(
-            &Mat::from_slice(frame_buffer.buffer()).expect("Impossible de lire le buffer image"),
+            &Mat::from_slice(frame_buffer.buffer()).expect("Unable to read image buffer"),
             IMREAD_COLOR,
         )
-        .expect("Échec du décodage du flux MJPEG"))
+        .expect("Failed to decode MJPEG stream"))
     }
 
-    /// Isole la couleur de la bille (généralement orange fluo) dans l'espace HSV
+    /// Isolate the ball color (typically fluorescent orange) in HSV color space
     pub fn threshold(image_bgr: &Mat) -> Result<Mat, Box<dyn std::error::Error>> {
         let mut hsv = Mat::default();
         let mut mask = Mat::default();
         cvt_color(image_bgr, &mut hsv, COLOR_BGR2HSV, 0)?;
 
-        // Coefficient de conversion HSV OpenCV (0-100% -> 0-255)
+        // HSV OpenCV conversion coefficient (0-100% -> 0-255)
         const K: f64 = 2.55;
 
         let ball_lower_color = ball::get_ball_color(ball::BallColor::Lower);
@@ -88,14 +80,14 @@ impl Camera {
         Ok(mask)
     }
 
-    /// Applique un léger flou gaussien pour éliminer le bruit numérique de l'image
+    /// Apply a slight Gaussian blur to eliminate digital noise from the image
     pub fn blur(mask: &Mat) -> Result<Mat, Box<dyn std::error::Error>> {
         let mut blurred = Mat::default();
         gaussian_blur(mask, &mut blurred, Size::new(5, 5), 0., 0., 0)?;
         Ok(blurred)
     }
 
-    /// Analyse les contours pour calculer le centre (X,Y) et le rayon de la bille
+    /// Analyze contours to calculate the center (X,Y) and radius of the ball
     pub fn get_circle(
         &self,
         image_bgr: &Mat,
@@ -115,7 +107,7 @@ impl Camera {
         let mut max_area = 0.0;
         let mut best_contour = None;
 
-        // On cherche le plus grand contour correspondant à la couleur de la balle
+        // Find the largest contour matching the ball color
         for contour in contours.iter() {
             let area = opencv::imgproc::contour_area(&contour, false)?;
             if area > 50.0 && area > max_area {
@@ -139,7 +131,7 @@ impl Camera {
         Ok(None)
     }
 
-    /// Ferme proprement le flux matériel de la caméra
+    /// Properly close the camera hardware stream
     pub fn close(&mut self) -> Result<(), NokhwaError> {
         self.camera.stop_stream()
     }

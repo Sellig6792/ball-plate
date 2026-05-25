@@ -15,7 +15,7 @@ pub fn get_ball_color(ball_color: BallColor) -> HSV {
         Ok(value) => value
             .as_str()
             .try_into()
-            .unwrap_or_else(|_| panic!("BALL_{}_COLOR is not a valid HSV value", e)),
+            .expect(format!("BALL_{}_COLOR is not a valid HSV color", e).as_str()),
         Err(_) => panic!("BALL_{}_COLOR is not set", e),
     }
 }

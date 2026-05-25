@@ -48,39 +48,48 @@ impl Pid {
         let kp: f32 = env::var("PID_KP")
             .expect("The environment variable 'PID_KP' is missing.")
             .parse()
-            .expect("Failed to parse 'PID_KP' into a valid float (f32).");
-
+            .unwrap();
         let ki: f32 = env::var("PID_KI")
             .expect("The environment variable 'PID_KI' is missing.")
             .parse()
-            .expect("Failed to parse 'PID_KI' into a valid float (f32).");
-
+            .unwrap();
         let kd: f32 = env::var("PID_KD")
             .expect("The environment variable 'PID_KD' is missing.")
             .parse()
-            .expect("Failed to parse 'PID_KD' into a valid float (f32).");
-
+            .unwrap();
         let fps: f32 = env::var("FRAME_RATE")
             .expect("The environment variable 'FRAME_RATE' is missing.")
             .parse()
-            .expect("Failed to parse 'FRAME_RATE' into a valid float (f32).");
+            .unwrap();
 
-        // Récupération des flags d'inversion
         let invert_x: bool = env::var("INVERT_X")
-            .unwrap_or_else(|_| "false".to_string())
+            .expect("The environment variable 'INVERT_X' is missing.")
             .parse()
-            .unwrap_or(false);
+            .unwrap();
         let invert_y: bool = env::var("INVERT_Y")
-            .unwrap_or_else(|_| "false".to_string())
+            .expect("The environment variable 'INVERT_Y' is missing.")
             .parse()
-            .unwrap_or(false);
+            .unwrap();
 
-        let center_x_raw = env::var("TARGET_CENTER_X").unwrap().parse().unwrap();
-        let center_y_raw = env::var("TARGET_CENTER_Y").unwrap().parse().unwrap();
-        let plate_size_pixel: f32 = env::var("PLATE_WIDTH_PIXELS").unwrap().parse().unwrap();
+        let center_x_raw = env::var("TARGET_CENTER_X")
+            .expect("The environment variable 'TARGET_CENTER_X' is missing.")
+            .parse()
+            .unwrap();
+        let center_y_raw = env::var("TARGET_CENTER_Y")
+            .expect("The environment variable 'TARGET_CENTER_Y' is missing.")
+            .parse()
+            .unwrap();
+        let plate_size_pixel: f32 = env::var("PLATE_WIDTH_PIXELS")
+            .expect("The environment variable 'PLATE_WIDTH_PIXELS' is missing.")
+            .parse()
+            .unwrap();
 
         // Dimensions physiques réelles de la plaque de jeu (40x40 cm)
-        let plate_physical_size_cm = 40.0;
+        let plate_physical_size_cm: f32 = env::var("PLATE_PHYSICAL_SIZE_CM")
+            .expect("The environment variable 'PLATE_PHYSICAL_SIZE_CM' is missing.")
+            .parse()
+            .unwrap();
+
         let pixels_per_cm = plate_size_pixel / plate_physical_size_cm;
 
         Self {
