@@ -160,34 +160,38 @@ impl Pid {
             return Err("The normalized height h must be between 0.0 and 1.0.".to_string());
         }
 
-        let r_str = env::var("ARM_R")
-            .map_err(|_| "The environment variable 'ARM_R' is missing.".to_string())?;
-        let r: f32 = r_str
+        let a_str = env::var("ARM")
+            .map_err(|_| "The environment variable 'ARM' is missing.".to_string())?;
+        let arm: f32 = a_str
             .parse()
-            .map_err(|_| "Failed to parse 'ARM_R' into a valid float (f32).".to_string())?;
+            .map_err(|_| "Failed to parse 'ARM' into a valid float (f32).".to_string())?;
 
-        let s_str = env::var("ROD_S")
-            .map_err(|_| "The environment variable 'ROD_S' is missing.".to_string())?;
-        let s: f32 = s_str
+        let r_str = env::var("ROD")
+            .map_err(|_| "The environment variable 'ROD' is missing.".to_string())?;
+        let rod: f32 = r_str
             .parse()
-            .map_err(|_| "Failed to parse 'ROD_S' into a valid float (f32).".to_string())?;
+            .map_err(|_| "Failed to parse 'ROD' into a valid float (f32).".to_string())?;
 
-        if s <= r {
+        if rod <= arm {
             return Err(
-                "Mechanical error: the rod (S) must be strictly longer than the arm (R)."
+                "Mechanical error: the rod must be strictly longer than the arm."
                     .to_string(),
             );
         }
 
-        let y = (s - r) + (2.0 * r * h);
-        let argument = (y.powi(2) - s.powi(2) + r.powi(2)) / (2.0 * r * y);
+        let height = (rod - arm) + (2.0 * arm * h);
+        println!("height: {}", height);
+        // let argument = (height.powi(2) - arm.powi(2) + rod.powi(2)) / (2.0 * rod * height);
+        let argument = (height.powi(2) + arm.powi(2) - rod.powi(2)) / (2.0 * arm * height);
         let argument_clamped = argument.clamp(-1.0, 1.0);
 
-        let theta_base_rad = argument_clamped.asin();
+        // let theta_base_rad = argument_clamped.asin();
+        let theta_base_rad = argument_clamped.acos();
         let theta_base_degrees = theta_base_rad.to_degrees();
 
-        // Transformation pour la plage 0° (MIN) à 180° (MAX)
-        let theta_degrees: u16 = (theta_base_degrees + 180.0).round() as u16;
+        // Transformation pour la plage 90 -> 270
+        // let theta_degrees: u16 = (theta_base_degrees + 180.0).round() as u16;
+        let theta_degrees: u16 = (270. - theta_base_degrees).round() as u16;
 
         Ok(theta_degrees)
     }
