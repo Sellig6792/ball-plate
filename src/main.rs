@@ -85,21 +85,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         .expect("USB_BAUD_RATE must be set")
         .parse()?;
 
-    let mut arduino_o = match UsbController::new(&usb_port, baud_rate) {
-        Ok(controller) => {
-            println!("Connecté à l'Arduino sur {}", usb_port);
-            // Pause essentielle pour laisser l'Arduino finir son auto-reset
-            std::thread::sleep(std::time::Duration::from_secs(2));
-            Some(controller)
-        }
-        Err(e) => {
-            eprintln!(
-                "Attention : Impossible de se connecter à l'Arduino sur {} ({})",
-                usb_port, e
-            );
-            None
-        }
-    };
+    let mut arduino = UsbController::new(&usb_port, baud_rate)?;
 
     let center_x: f32 = env::var("TARGET_CENTER_X")
         .unwrap_or_else(|_| "320.0".to_string())
@@ -124,6 +110,8 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     loop {
         let start_loop = Instant::now();
 
+        arduino.println(&mut serial_buffer);
+
         if frame_mat.empty() {
             continue;
         }
@@ -135,6 +123,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         frame_mat = camera.get_frame()?;
 
         let ball = camera.get_circle(&frame_mat)?;
+
         match ball {
             Some(_) => {}
             None => continue,
@@ -158,12 +147,9 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         let command_x = adjust(pid.calculer_inclinaison(Axe::X, center.x as f32));
         let command_y = adjust(pid.calculer_inclinaison(Axe::Y, center.y as f32));
 
-        println!("PID: X: {:.2} Y: {:.2} ", command_x, command_y);
+        println!("[PID]     X: {:.2} ; Y: {:.2} ", command_x, command_y);
 
-        if let Some(ref mut arduino) = arduino_o {
-            arduino.send(command_x, command_y);
-            arduino.println(&mut serial_buffer);
-        }
+        arduino.send(command_x, command_y);
 
         if let Some(last_center_pt) = last_center {
             let dt = start_loop.elapsed().as_secs_f32();

@@ -13,9 +13,23 @@ impl UsbController {
     pub fn new(port_name: &str, baud_rate: u32) -> Result<Self, serialport::Error> {
         let port = serialport::new(port_name, baud_rate)
             .timeout(Duration::from_millis(10))
-            .open()?;
+            .open();
 
-        Ok(Self { port })
+        match port {
+            Ok(p) => {
+                println!("Connecté à l'Arduino sur {}", port_name);
+                // Pause essentielle pour laisser l'Arduino finir son auto-reset
+                std::thread::sleep(std::time::Duration::from_secs(2));
+                Ok(Self { port: p })
+            }
+
+            Err(e) => {
+                panic!(
+                    "Attention : Impossible de se connecter à l'Arduino sur {} ({})",
+                    port_name, e
+                );
+            }
+        }
     }
 
     /// Envoie des octets bruts (pratique pour envoyer des coordonnées de tracking)
@@ -26,12 +40,10 @@ impl UsbController {
     }
 
     pub fn send(&mut self, command_x: f32, command_y: f32) {
-        // Conversion finale en octet entier (u8)
-        let angle_x = (command_x * 180.) as u8 + 90;
-        let angle_y = (command_y * 180.) as u8 + 90;
-        println!("COMMAND: x: {:.2} y: {:.2}", command_x, command_y);
+        let command_x = (command_x * 255.0) as u8;
+        let command_y = (command_y * 255.0) as u8;
 
-        let packet: [u8; 3] = [0xFF, angle_x, angle_y];
+        let packet: [u8; 3] = [0xFF, command_x, command_y];
 
         if let Err(e) = self.send_bytes(&packet) {
             eprintln!("Erreur lors de l'envoi USB : {:?}", e);
