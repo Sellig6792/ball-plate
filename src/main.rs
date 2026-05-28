@@ -84,6 +84,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         .expect("USB_BAUD_RATE must be set")
         .parse()?;
 
+    #[cfg(not(feature = "arduino-less"))]
     let mut arduino = UsbController::new(&usb_port, baud_rate)?;
     
     let mut pid = Pid::from_env();
@@ -92,6 +93,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     let mut last_center: Option<utils::Point> = None;
 
     // Buffer pour accumuler les caractères reçus de l'Arduino
+    #[cfg(not(feature = "arduino-less"))]
     let mut serial_buffer = Vec::new();
 
     let mut frame_mat = camera.get_frame()?;
@@ -99,6 +101,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     loop {
         let start_loop = Instant::now();
 
+        #[cfg(not(feature = "arduino-less"))]
         arduino.println(&mut serial_buffer);
 
         if frame_mat.empty() {
@@ -140,7 +143,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         let angle_x = Pid::angle_from_height(command_x)?;
         let angle_y = Pid::angle_from_height(command_y)?;
 
-
+        #[cfg(not(feature = "arduino-less"))]
         arduino.send(angle_x, angle_y);
 
         if let Some(last_center_pt) = last_center {
