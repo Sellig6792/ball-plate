@@ -6,6 +6,7 @@ version = 4
 name = "HH-ball-plate"
 version = "0.1.0"
 dependencies = [
+ "cprint",
  "dotenv",
  "easy_color",
  "nokhwa",
@@ -290,6 +291,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "colored"
+version = "2.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "117725a109d387c937a1533ce01b450cbde6b88abceea8473c4d7a85853cda3c"
+dependencies = [
+ "lazy_static",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "combine"
 version = "4.6.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -420,6 +431,15 @@ dependencies = [
  "libc",
  "metal",
  "objc",
+]
+
+[[package]]
+name = "cprint"
+version = "1.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "64bf4c02be6bb9bbbdaea190da96053c7bc840a48c61848b3f23a351eb16f3e8"
+dependencies = [
+ "colored",
 ]
 
 [[package]]

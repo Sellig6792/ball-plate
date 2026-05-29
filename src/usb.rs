@@ -1,6 +1,7 @@
 use serialport::SerialPort;
 use std::io::Write;
 use std::time::Duration;
+use cprint::{cprint, cprintln};
 
 pub struct UsbController {
     pub port: Box<dyn SerialPort>,
@@ -17,7 +18,7 @@ impl UsbController {
 
         match port {
             Ok(p) => {
-                println!("Connecté à l'Arduino sur {}", port_name);
+                cprintln!("Log", format!("Connecté à l'Arduino sur {}", port_name) => Cyan);
                 // Pause essentielle pour laisser l'Arduino finir son auto-reset
                 std::thread::sleep(std::time::Duration::from_secs(2));
                 Ok(Self { port: p })
@@ -39,16 +40,6 @@ impl UsbController {
         Ok(())
     }
 
-    // pub fn send(&mut self, command_x: f32, command_y: f32) {
-    //     let command_x = (command_x * 255.0) as u8;
-    //     let command_y = (command_y * 255.0) as u8;
-    // 
-    //     let packet: [u8; 3] = [0xFF, command_x, command_y];
-    // 
-    //     if let Err(e) = self.send_bytes(&packet) {
-    //         eprintln!("Erreur lors de l'envoi USB : {:?}", e);
-    //     }
-    // }
     pub fn send(&mut self, angle_x: u16, angle_y: u16) {
         // Angle is from 0 to 180
         let high_x = (angle_x >> 8) as u8;
@@ -88,7 +79,7 @@ impl UsbController {
                 let line_bytes = serial_buffer.drain(..=pos).collect::<Vec<u8>>();
                 if let Ok(message) = String::from_utf8(line_bytes) {
                     // Affiche le message de l'Arduino proprement dans la console Rust
-                    print!("[Arduino] {}", message);
+                    cprint!("Arduino",  message => Blue);
                 }
             }
         }

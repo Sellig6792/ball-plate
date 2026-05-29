@@ -6,8 +6,10 @@ mod utils;
 
 use crate::app::UserEvent::ChangeImage;
 use crate::app::{App, UserEvent};
+use crate::utils::Point;
 use crate::utils::draw::upscale_mat;
 use camera::Camera;
+use cprint::{ceprintln, cprintln};
 use opencv::core::MatTraitConst;
 use opencv::core::{Mat, Scalar};
 use pid::{Axe, Pid};
@@ -44,9 +46,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let proxy_task = update_app.clone();
 
                         let _ = tokio::task::spawn_blocking(move || {
-                            let _ = proxy_task.send_event(ChangeImage(
-                                upscale_mat(&frame, 2.).expect("COULDNT UPSCALE"),
-                            ));
+                            let _ = proxy_task.send_event(ChangeImage(frame));
                         })
                         .await;
                     }
@@ -55,7 +55,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Tâche de traitement caméra et PID
                 tokio::task::spawn_blocking(move || {
                     if let Err(e) = run_camera_capture(tx) {
-                        eprintln!("Erreur lors de la capture caméra : {:?}", e);
+                        ceprintln!(
+                            "Error",
+                            format!("while camera capture : {:?}", e)
+                        );
                     }
                 })
                 .await
@@ -68,8 +71,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App {
         window_graphics: None,
         image_pixels: Vec::new(),
-        img_width: 640,
-        img_height: 480,
+        img_width: 640 * 2,
+        img_height: 480 * 2,
     };
 
     event_loop.run_app(&mut app)?;
@@ -86,11 +89,11 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
     #[cfg(not(feature = "arduino-less"))]
     let mut arduino = UsbController::new(&usb_port, baud_rate)?;
-    
+
     let mut pid = Pid::from_env();
 
-    println!("Capture et asservissement démarrés...");
-    let mut last_center: Option<utils::Point> = None;
+    cprintln!("Log", "Capture et asservissement démarrés..." => Cyan);
+    let mut last_center: Option<Point> = None;
 
     // Buffer pour accumuler les caractères reçus de l'Arduino
     #[cfg(not(feature = "arduino-less"))]
@@ -104,15 +107,31 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         #[cfg(not(feature = "arduino-less"))]
         arduino.println(&mut serial_buffer);
 
+        if let Err(e) = tx.try_send(frame_mat.clone()) {
+            match e {
+                mpsc::error::TrySendError::Full(_) => {
+                    // UI is too slow, skipping this frame to prevent std::bad_alloc
+                }
+                mpsc::error::TrySendError::Closed(_) => {
+                    cprintln!("Log", "The graphical receiver was closed. Stopping." => Cyan);
+                    break;
+                }
+            }
+        }
+
+        frame_mat = camera.get_frame()?;
+
         if frame_mat.empty() {
             continue;
         }
 
-        if tx.blocking_send(frame_mat.clone()).is_err() {
-            println!("Le récepteur graphique a été fermé. Arrêt de la capture.");
-            break;
-        }
-        frame_mat = camera.get_frame()?;
+        let _ = utils::draw::draw_circle(
+            &mut frame_mat,
+            &Point::new(pid.center_x_pixel as i32, pid.center_y_pixel as i32),
+            2,
+            utils::draw::CircleType::Point,
+            Scalar::new(197.0, 73.0, 137.0, 0.0),
+        );
 
         let ball = camera.get_circle(&frame_mat)?;
 
@@ -121,6 +140,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             None => continue,
         }
         let (center, mut radius) = ball.unwrap();
+        cprintln!("Ball", format!("Center: ({:.2}, {:.2})", center.x, center.y) => Yellow);
 
         if let Ok(defined_radius) = env::var("RADIUS") {
             radius = defined_radius
@@ -139,7 +159,8 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         let command_x = pid.calculer_inclinaison(Axe::X, center.x as f32);
         let command_y = pid.calculer_inclinaison(Axe::Y, center.y as f32);
 
-        println!("[PID]     X: {:.2} ; Y: {:.2} ", command_x, command_y);
+        cprintln!("PID", format!("X: {:.2} ; Y: {:.2} ", command_x, command_y) => Magenta);
+
         let angle_x = Pid::angle_from_height(command_x)?;
         let angle_y = Pid::angle_from_height(command_y)?;
 

@@ -2,10 +2,12 @@ use opencv::core::{Mat, MatTraitConst, MatTraitConstManual};
 use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::rc::Rc;
+use cprint::ceprintln;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
+use crate::utils::draw::upscale_mat;
 
 // Événement personnalisé pour notifier l'application qu'une nouvelle image doit être affichée
 #[derive(Debug)]
@@ -23,6 +25,13 @@ pub struct App {
 
 impl App {
     fn load_new_frame(&mut self, frame: &Mat) {
+        let frame = match upscale_mat(&frame, 2.) {
+            Ok(mat) => mat,
+            Err(e) => {
+                ceprintln!("Error", format!("while upscaling the image: {:?}", e));
+                return;
+            }
+        };
         let size = frame.size().unwrap();
         let width = size.width as u32;
         let height = size.height as u32;
@@ -96,7 +105,6 @@ impl ApplicationHandler<UserEvent> for App {
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::ChangeImage(frame) => {
-                // println!("Changement d'image en cours : {}", path);
                 self.load_new_frame(&frame);
             }
         }

@@ -34,8 +34,8 @@ pub struct Pid {
     config: PidConfig,
     state_x: PidState,
     state_y: PidState,
-    center_x_pixel: f32,
-    center_y_pixel: f32,
+    pub center_x_pixel: f32,
+    pub center_y_pixel: f32,
     pixels_per_cm: f32,
 }
 
