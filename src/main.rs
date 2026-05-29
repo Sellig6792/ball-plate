@@ -47,7 +47,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = tokio::task::spawn_blocking(move || {
                             let _ = proxy_task.send_event(ChangeImage(frame));
                         })
-                            .await;
+                        .await;
                     }
                 });
 
@@ -57,8 +57,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ceprintln!("Error", format!("while camera capture: {:?}", e));
                     }
                 })
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
             });
         }
     });
@@ -135,14 +135,8 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             Some(_) => {}
             None => continue,
         }
-        let (center, mut radius) = ball.unwrap();
-        cprintln!("Ball", format!("Center: ({:.2}, {:.2})", center.x, center.y) => Yellow);
-
-        if let Ok(defined_radius) = env::var("RADIUS") {
-            radius = defined_radius
-                .parse::<i32>()
-                .expect("RADIUS must be a number");
-        }
+        let (center, radius) = ball.unwrap();
+        cprintln!("Ball", format!("X: {:4.} , Y: {:4.}", center.x, center.y) => Yellow);
 
         let _ = utils::draw::draw_circle(
             &mut frame_mat,
@@ -171,8 +165,6 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         last_center = Some(center);
     }
 
-    camera
-        .close()
-        .expect("Error while closing the camera");
+    camera.close().expect("Error while closing the camera");
     Ok(())
 }
