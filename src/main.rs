@@ -21,11 +21,20 @@ use winit::event_loop::EventLoop;
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
-    // 1. WINIT INITIALIZATION (Main thread)
+    // 1. READ ENVIRONMENT CONFIGURATIONS FOR WINDOW RESOLUTION
+    // If not set in .env, defaults to standard 2x scaling configurations (1280x960)
+    let img_width: i32 = std::env::var("WINDOW_WIDTH")
+        .unwrap_or_else(|_| "1280".to_string())
+        .parse()?;
+    let img_height: i32 = std::env::var("WINDOW_HEIGHT")
+        .unwrap_or_else(|_| "960".to_string())
+        .parse()?;
+
+    // 2. WINIT INITIALIZATION (Main thread)
     let event_loop: EventLoop<UserEvent> = EventLoop::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
 
-    // 2. STARTING TOKIO IN A DEDICATED THREAD
+    // 3. STARTING TOKIO IN A DEDICATED THREAD
     std::thread::spawn({
         let proxy = proxy.clone();
 
@@ -38,7 +47,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             rt.block_on(async move {
                 let (tx, mut rx) = mpsc::channel::<Mat>(100);
 
-                // Async task for sending images to the UI
                 let update_app = proxy.clone();
                 tokio::spawn(async move {
                     while let Some(frame) = rx.recv().await {
@@ -51,7 +59,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 });
 
-                // Camera processing and PID task
                 tokio::task::spawn_blocking(move || {
                     if let Err(e) = run_camera_capture(tx) {
                         ceprintln!("Error", format!("while camera capture: {:?}", e));
@@ -63,12 +70,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // 3. LAUNCHING THE GRAPHICAL APPLICATION
+    // 4. LAUNCHING THE GRAPHICAL APPLICATION (Using parsed variables)
     let mut app = App {
         window_graphics: None,
         image_pixels: Vec::new(),
-        img_width: 640 * 2,
-        img_height: 480 * 2,
+        img_width: img_width as u32,
+        img_height: img_height as u32,
     };
 
     event_loop.run_app(&mut app)?;
@@ -91,9 +98,20 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     cprintln!("Log", "Capture and control loops started..." => Cyan);
     let mut last_center: Option<Point> = None;
 
-    // Telemetry display setup: Stores 120 historic slices, dimensions 280x140px per grid
+    // --- ENVIRONMENT CONFIGURATIONS FOR TELEMETRY PLOT ---
+    // Grabs dimensions for drawing graph boxes from environment variables
     #[cfg(not(feature = "no-graph"))]
-    let mut telemetry_plot = utils::plot::TelemetryPlot::new(120, 280, 140);
+    let graph_width: i32 = std::env::var("GRAPH_WIDTH")
+        .unwrap_or_else(|_| "250".to_string())
+        .parse()?;
+    #[cfg(not(feature = "no-graph"))]
+    let graph_height: i32 = std::env::var("GRAPH_HEIGHT")
+        .unwrap_or_else(|_| "125".to_string())
+        .parse()?;
+
+    #[cfg(not(feature = "no-graph"))]
+    let mut telemetry_plot = utils::plot::TelemetryPlot::new(120, graph_width, graph_height);
+    // -----------------------------------------------------
 
     #[cfg(all(not(feature = "no-graph"), feature = "arduino-less"))]
     let current_feedback = (180i16, 180i16);
@@ -103,7 +121,6 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     #[cfg(not(feature = "no-graph"))]
     let mut current_target = (180u16, 180u16);
 
-    // Buffer to accumulate characters received from the Arduino
     #[cfg(all(not(feature = "arduino-less"), not(feature = "no-graph")))]
     let mut serial_buffer: Vec<u8> = Vec::new();
 
@@ -114,9 +131,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
         if let Err(e) = tx.try_send(frame_mat.clone()) {
             match e {
-                mpsc::error::TrySendError::Full(_) => {
-                    // UI is too slow, skipping this frame to prevent std::bad_alloc
-                }
+                mpsc::error::TrySendError::Full(_) => {}
                 mpsc::error::TrySendError::Closed(_) => {
                     cprintln!("Log", "The graphical receiver was closed. Stopping." => Cyan);
                     break;
@@ -130,7 +145,6 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             continue;
         }
 
-        // Process incoming binary telemetry packets from the MCU
         #[cfg(all(not(feature = "arduino-less"), not(feature = "no-graph")))]
         if let Some((fb_x, fb_y)) = arduino.read_feedback(&mut serial_buffer) {
             current_feedback = (fb_x, fb_y);
@@ -151,15 +165,14 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             None => {
                 #[cfg(not(feature = "no-graph"))]
                 {
-                    // If tracking is lost, maintain visual stream rendering using historical parameters
                     telemetry_plot.push(
                         current_target.0 as i16,
                         current_feedback.0,
                         current_target.1 as i16,
                         current_feedback.1,
                     );
-                    let _ = telemetry_plot.draw_axis(&mut frame_mat, 20, 20, true);
-                    let _ = telemetry_plot.draw_axis(&mut frame_mat, 310, 20, false);
+
+                    let _ = telemetry_plot.draw(&mut frame_mat);
                 }
                 continue;
             }
@@ -191,7 +204,6 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         #[cfg(not(feature = "arduino-less"))]
         arduino.send(_angle_x, _angle_y);
 
-        // Append updated execution metrics into telemetry records
         #[cfg(not(feature = "no-graph"))]
         telemetry_plot.push(
             current_target.0 as i16,
@@ -200,11 +212,8 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             current_feedback.1,
         );
 
-        // Blit telemetry graphs onto the active image frame (Top-Left positioning configuration)
         #[cfg(not(feature = "no-graph"))]
-        let _ = telemetry_plot.draw_axis(&mut frame_mat, 20, 20, true); // X-Axis graph
-        #[cfg(not(feature = "no-graph"))]
-        let _ = telemetry_plot.draw_axis(&mut frame_mat, 310, 20, false); // Y-Axis graph
+        let _ = telemetry_plot.draw(&mut frame_mat);
 
         if let Some(last_center_pt) = last_center {
             let dt = start_loop.elapsed().as_secs_f32();

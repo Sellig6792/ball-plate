@@ -39,6 +39,22 @@ impl TelemetryPlot {
         self.feedback_y_history.push_back(feedback_y);
     }
 
+    /// Automatically handles symmetric layout math and draws both graphs
+    pub fn draw(&self, frame: &mut Mat) -> Result<(), opencv::Error> {
+        let margin = 20;
+        let frame_width = frame.cols();
+
+        // Compute starting positions for horizontal layout
+        let x_pos_graph_x = margin;
+        let x_pos_graph_y = frame_width - margin - self.width;
+        let top_y = 20;
+
+        self.draw_axis(frame, x_pos_graph_x, top_y, true)?;
+        self.draw_axis(frame, x_pos_graph_y, top_y, false)?;
+
+        Ok(())
+    }
+
     /// Blits telemetry lines of a specific selection onto the frame with a transparent card
     pub fn draw_axis(
         &self,
@@ -48,52 +64,38 @@ impl TelemetryPlot {
         is_axis_x: bool,
     ) -> Result<(), opencv::Error> {
         let (targets, feedbacks, label) = if is_axis_x {
-            (
-                &self.target_x_history,
-                &self.feedback_x_history,
-                "Servo X (Deg)",
-            )
+            (&self.target_x_history, &self.feedback_x_history, "Servo X")
         } else {
-            (
-                &self.target_y_history,
-                &self.feedback_y_history,
-                "Servo Y (Deg)",
-            )
+            (&self.target_y_history, &self.feedback_y_history, "Servo Y")
         };
 
         if targets.is_empty() {
             return Ok(());
         }
 
-        // --- TRANSPARENT BACKGROUND MATRIX BLENDING (FIXED BORROW CHECKER) ---
-        // 1. Define the region of interest (ROI)
+        // --- TRANSPARENT BACKGROUND MATRIX BLENDING ---
         let roi_rect = Rect::new(x, y, self.width, self.height);
-
-        // 2. Extract a mutable sub-matrix view of the region
         let mut sub_mat = Mat::roi_mut(frame, roi_rect)?;
 
-        // 3. Create the dark tint overlay layer matching the dimensions of the ROI
         let overlay = Mat::new_size_with_default(
             roi_rect.size(),
             sub_mat.typ(),
-            Scalar::new(25.0, 25.0, 25.0, 0.0), // Tint color
+            Scalar::new(25.0, 25.0, 25.0, 0.0),
         )?;
 
-        // 4. Blend to a temporary Mat first to prevent simultaneous mutable/immutable borrowing
         let mut blended = Mat::default();
         let alpha = 0.60;
         let beta = 1.0 - alpha;
         add_weighted(&sub_mat, alpha, &overlay, beta, 0.0, &mut blended, -1)?;
-
-        // 5. Safely copy the blended pixels back into the sub_mat frame area
         blended.copy_to(&mut sub_mat)?;
         // --------------------------------------------------------------------
 
-        // Scale setup ranging from 0 to 300 degrees
-        let min_val = 0.0f32;
-        let max_val = 300.0f32;
+        // Scale setup ranging from 90 to 270 degrees
+        let min_val = 90.0f32;
+        let max_val = 270.0f32;
         let val_range = max_val - min_val;
 
+        // Maps absolute data into localized chart coordinates
         let map_point = |index: usize, value: i16| -> CvPoint {
             let pct_x = index as f32 / (self.max_points - 1) as f32;
             let pct_y = (value as f32 - min_val) / val_range;
@@ -102,9 +104,44 @@ impl TelemetryPlot {
             CvPoint::new(pt_x, pt_y)
         };
 
-        // Draw opaque telemetry dataset curves directly on top of the blended zone
+        // --- DRAW GRADUATIONS & GRIDLINES ---
+        // We'll draw dashed/subtle lines for 90, 135, 180, 225, and 270 degrees
+        let graduation_levels = [90, 135, 180, 225, 270];
+        for &level in &graduation_levels {
+            // Get the Y position for this specific angle level
+            let left_pt = map_point(0, level);
+            let right_pt = map_point(self.max_points - 1, level);
+
+            // Subtle dark gray gridline
+            line(
+                frame,
+                left_pt,
+                right_pt,
+                Scalar::new(60.0, 60.0, 60.0, 0.0),
+                1,
+                LINE_8,
+                0,
+            )?;
+
+            // Graduation value text (e.g., "180°")
+            let text_val = format!("{}*", level); // Using '*' or 'deg' since standard OpenCV fonts don't render '°' well
+            let text_pos = CvPoint::new(x + self.width - 45, left_pt.y + 5);
+            put_text(
+                frame,
+                &text_val,
+                text_pos,
+                FONT_HERSHEY_SIMPLEX,
+                0.35,
+                Scalar::new(180.0, 180.0, 180.0, 0.0), // Muted gray text
+                1,
+                LINE_8,
+                false,
+            )?;
+        }
+
+        // --- DRAW TELEMETRY DATASET CURVES ---
         for i in 0..targets.len() - 1 {
-            // Requested Target Curve (Magenta)
+            // 1. Requested Target Curve (Magenta)
             let pt_target_start = map_point(i, targets[i]);
             let pt_target_end = map_point(i + 1, targets[i + 1]);
             line(
@@ -117,7 +154,7 @@ impl TelemetryPlot {
                 0,
             )?;
 
-            // Hardware Response Curve (Cyan)
+            // 2. Hardware Response Curve (Cyan)
             let pt_feed_start = map_point(i, feedbacks[i]);
             let pt_feed_end = map_point(i + 1, feedbacks[i + 1]);
             line(
@@ -129,9 +166,25 @@ impl TelemetryPlot {
                 LINE_8,
                 0,
             )?;
+
+            // 3. Absolute Delta Curve (Yellow)
+            let delta_start = (targets[i] - feedbacks[i]).abs() + min_val as i16;
+            let delta_end = (targets[i + 1] - feedbacks[i + 1]).abs() + min_val as i16;
+
+            let pt_delta_start = map_point(i, delta_start);
+            let pt_delta_end = map_point(i + 1, delta_end);
+            line(
+                frame,
+                pt_delta_start,
+                pt_delta_end,
+                Scalar::new(0.0, 255.0, 255.0, 0.0),
+                1,
+                LINE_8,
+                0,
+            )?;
         }
 
-        // Overlay axis label text
+        // Overlay axis title text
         put_text(
             frame,
             label,
