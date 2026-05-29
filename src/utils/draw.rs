@@ -58,22 +58,22 @@ pub fn draw_vector(edges_map: &mut Mat, origin: Point, destination: Point) -> Re
 }
 
 pub fn upscale_mat(src: &Mat, scale: f64) -> Result<Mat, Error> {
-    // 1. Initialiser la matrice de destination vide
+    // 1. Initialize an empty destination matrix
     let mut dst = Mat::default();
 
-    // 2. Calculer les nouvelles dimensions cibles
+    // 2. Calculate the new target dimensions
     let new_width = (src.cols() as f64 * scale).round() as i32;
     let new_height = (src.rows() as f64 * scale).round() as i32;
     let target_size = Size::new(new_width, new_height);
 
-    // 3. Appliquer le redimensionnement
+    // 3. Apply resizing
     imgproc::resize(
         src,
         &mut dst,
         target_size,
         0.0,
         0.0,
-        imgproc::INTER_CUBIC, // Algorithme optimal pour l'agrandissement
+        imgproc::INTER_CUBIC, // Optimal algorithm for upscaling
     )?;
 
     Ok(dst)

@@ -1,7 +1,7 @@
 mod app;
 mod camera;
 mod pid;
-mod usb; // 1. Déclaration du module usb.rs
+mod usb;
 mod utils;
 
 use crate::app::UserEvent::ChangeImage;
@@ -15,17 +15,17 @@ use pid::{Axe, Pid};
 use std::env;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use usb::UsbController; // 2. Import du contrôleur USB
+use usb::UsbController;
 use winit::event_loop::EventLoop;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
-    // 1. INITIALISATION DE WINIT (Thread principal)
+    // 1. WINIT INITIALIZATION (Main thread)
     let event_loop: EventLoop<UserEvent> = EventLoop::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
 
-    // 2. DÉMARRAGE DE TOKIO DANS UN THREAD DÉDIÉ
+    // 2. STARTING TOKIO IN A DEDICATED THREAD
     std::thread::spawn({
         let proxy = proxy.clone();
 
@@ -38,7 +38,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             rt.block_on(async move {
                 let (tx, mut rx) = mpsc::channel::<Mat>(100);
 
-                // Tâche Async d'envoi d'image vers l'UI
+                // Async task for sending images to the UI
                 let update_app = proxy.clone();
                 tokio::spawn(async move {
                     while let Some(frame) = rx.recv().await {
@@ -47,23 +47,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = tokio::task::spawn_blocking(move || {
                             let _ = proxy_task.send_event(ChangeImage(frame));
                         })
-                        .await;
+                            .await;
                     }
                 });
 
-                // Tâche de traitement caméra et PID
+                // Camera processing and PID task
                 tokio::task::spawn_blocking(move || {
                     if let Err(e) = run_camera_capture(tx) {
-                        ceprintln!("Error", format!("while camera capture : {:?}", e));
+                        ceprintln!("Error", format!("while camera capture: {:?}", e));
                     }
                 })
-                .await
-                .unwrap();
+                    .await
+                    .unwrap();
             });
         }
     });
 
-    // 3. LANCEMENT DE L'APPLICATION GRAPHIQUE
+    // 3. LAUNCHING THE GRAPHICAL APPLICATION
     let mut app = App {
         window_graphics: None,
         image_pixels: Vec::new(),
@@ -88,10 +88,10 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
     let mut pid = Pid::from_env();
 
-    cprintln!("Log", "Capture et asservissement démarrés..." => Cyan);
+    cprintln!("Log", "Capture and control loops started..." => Cyan);
     let mut last_center: Option<Point> = None;
 
-    // Buffer pour accumuler les caractères reçus de l'Arduino
+    // Buffer to accumulate characters received from the Arduino
     #[cfg(not(feature = "arduino-less"))]
     let mut serial_buffer: Vec<u8> = Vec::new();
 
@@ -152,8 +152,8 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             Scalar::new(0.0, 255.0, 0.0, 0.0),
         );
 
-        let command_x = pid.calculer_inclinaison(Axe::X, center.x as f32);
-        let command_y = pid.calculer_inclinaison(Axe::Y, center.y as f32);
+        let command_x = pid.calculate_inclination(Axe::X, center.x as f32);
+        let command_y = pid.calculate_inclination(Axe::Y, center.y as f32);
 
         cprintln!("PID", format!("X: {:.2} ; Y: {:.2} ", command_x, command_y) => Magenta);
 
@@ -173,6 +173,6 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
     camera
         .close()
-        .expect("Erreur lors de la fermeture de la caméra");
+        .expect("Error while closing the camera");
     Ok(())
 }

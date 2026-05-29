@@ -9,10 +9,10 @@ use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
-// Événement personnalisé pour notifier l'application qu'une nouvelle image doit être affichée
+// Custom event to notify the application that a new image needs to be displayed
 #[derive(Debug)]
 pub enum UserEvent {
-    ChangeImage(Mat), // Contient le chemin de la nouvelle image
+    ChangeImage(Mat), // Contains the new image data
 }
 
 type RcWin = Rc<Window>;
@@ -36,28 +36,28 @@ impl App {
         let width = size.width as u32;
         let height = size.height as u32;
 
-        // 1. On récupère les données brutes sous forme de slice de u8 (très rapide)
+        // 1. Retrieve raw data as a u8 slice (very fast)
         if let Ok(data) = frame.data_bytes() {
-            // 2. On pré-alloue le vecteur pour éviter les réallocations dynamiques
+            // 2. Pre-allocate the vector to prevent dynamic reallocations
             let total_pixels = (width * height) as usize;
             let mut new_pixels = Vec::with_capacity(total_pixels);
 
-            // 3. OpenCV stocke en BGR (3 octets par pixel). On avance de 3 en 3.
+            // 3. OpenCV stores in BGR format (3 bytes per pixel). Steps by 3.
             for chunk in data.chunks_exact(3) {
                 let b = chunk[0] as u32;
                 let g = chunk[1] as u32;
                 let r = chunk[2] as u32;
 
-                // Format Softbuffer : 0x00RRGGBB
+                // Softbuffer format: 0x00RRGGBB
                 new_pixels.push((r << 16) | (g << 8) | b);
             }
 
-            // 4. Mise à jour de l'état
+            // 4. Update state
             self.image_pixels = new_pixels;
             self.img_width = width;
             self.img_height = height;
 
-            // 5. Demande de redessiner
+            // 5. Request a redraw
             if let Some((window, _)) = &self.window_graphics {
                 window.request_redraw();
             }
@@ -68,7 +68,7 @@ impl App {
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window_graphics.is_none() {
-            // 1. On sécurise avec tes dimensions par défaut (640x480) si l'image n'est pas encore là
+            // 1. Fall back to your default dimensions (640x480) if the image isn't loaded yet
             let init_w = if self.img_width > 0 {
                 self.img_width
             } else {
@@ -80,20 +80,20 @@ impl ApplicationHandler<UserEvent> for App {
                 480
             };
 
-            // 2. On utilise LogicalSize pour bien s'adapter à l'affichage WSLg / Windows
+            // 2. Use LogicalSize to properly scale on WSLg / Windows displays
             let size = winit::dpi::LogicalSize::new(init_w as f64, init_h as f64);
 
             let attrs = Window::default_attributes()
                 .with_inner_size(size)
-                // Optionnel : tu peux bloquer le redimensionnement pour être tranquille
-                // .with_resizable(false)
+                // Optional: you can disable resizing to avoid issues
+                .with_resizable(false)
                 .with_title("Ball Tracking Visualisation");
 
             let window = Rc::new(event_loop.create_window(attrs).unwrap());
             let context = Context::new(window.clone()).unwrap();
             let mut surface = Surface::new(&context, window.clone()).unwrap();
 
-            // 3. Initialisation de la surface de dessin avec les mêmes dimensions sécurisées
+            // 3. Initialize the drawing surface using the same safe dimensions
             let width = NonZeroU32::new(init_w).unwrap();
             let height = NonZeroU32::new(init_h).unwrap();
             surface.resize(width, height).unwrap();
@@ -101,7 +101,8 @@ impl ApplicationHandler<UserEvent> for App {
             self.window_graphics = Some((window, surface));
         }
     }
-    // Capture de notre événement personnalisé en temps réel
+
+    // Capture our custom event in real-time
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::ChangeImage(frame) => {

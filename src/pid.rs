@@ -40,11 +40,11 @@ pub struct Pid {
 }
 
 impl Pid {
-    /// Construit le régulateur PID à partir des variables d'environnement globales et manuelles
+    /// Constructs the PID controller from global and manual environment variables
     pub fn from_env() -> Self {
         dotenv().ok();
 
-        // Récupération stricte des paramètres du PID depuis le fichier .env
+        // Strict retrieval of PID parameters from the .env file
         let kp: f32 = env::var("PID_KP")
             .expect("The environment variable 'PID_KP' is missing.")
             .parse()
@@ -84,7 +84,7 @@ impl Pid {
             .parse()
             .unwrap();
 
-        // Dimensions physiques réelles de la plaque de jeu (40x40 cm)
+        // Actual physical dimensions of the game plate (40x40 cm)
         let plate_physical_size_cm: f32 = env::var("PLATE_PHYSICAL_SIZE_CM")
             .expect("The environment variable 'PLATE_PHYSICAL_SIZE_CM' is missing.")
             .parse()
@@ -109,8 +109,8 @@ impl Pid {
         }
     }
 
-    /// Calcule la consigne d'inclinaison nécessaire pour corriger la dérive de la bille
-    pub fn calculer_inclinaison(&mut self, axe: Axe, ball_position_pixel: f32) -> f32 {
+    /// Calculates the required inclination setpoint to correct the ball's drift
+    pub fn calculate_inclination(&mut self, axe: Axe, ball_position_pixel: f32) -> f32 {
         let dt = self.config.dt;
 
         let (state, center_pixel, invert) = match axe {
@@ -118,7 +118,7 @@ impl Pid {
             Axe::Y => (&mut self.state_y, self.center_y_pixel, self.config.invert_y),
         };
 
-        // Calcul de l'écart spatial en centimètres
+        // Calculate spatial offset in centimeters
         let mut pixel_offset = center_pixel - ball_position_pixel;
 
         if invert {
@@ -127,31 +127,31 @@ impl Pid {
 
         let error_cm = (pixel_offset / self.pixels_per_cm).clamp(-20.0, 20.0);
 
-        // 1. Terme Proportionnel (P)
+        // 1. Proportional Term (P)
         let p = self.config.kp * error_cm;
 
-        // 2. Terme Intégral (I) avec système de butée (anti-windup)
+        // 2. Integral Term (I) with anti-windup clamping
         if self.config.ki > 0.0 {
             state.integral_sum += error_cm * dt;
             state.integral_sum = state.integral_sum.clamp(-5.0, 5.0);
         }
         let i = self.config.ki * state.integral_sum;
 
-        // 3. Terme Dérivé (D) basé sur la vitesse de déplacement de la bille
+        // 3. Derivative Term (D) based on the movement speed of the ball
         let d = if dt > 0.0 {
             self.config.kd * ((error_cm - state.error_previous) / dt)
         } else {
             0.0
         };
 
-        // Sauvegarde de l'erreur courante pour le prochain cycle
+        // Save current error for the next cycle
         state.error_previous = error_cm;
 
-        // Normalisation de la sortie du bloc vers un ratio centré autour de 0.5 (plaque plane)
+        // Normalize the block output to a ratio centered around 0.5 (flat plate)
         let pid_output = (p + i + d) / 60.0;
         let plate_inclination = 0.5 + pid_output;
 
-        // Limitation physique pour protéger la course mécanique de vos servomoteurs
+        // Physical limitation to protect the mechanical travel of your servomotors
         plate_inclination.clamp(0., 1.)
     }
 
@@ -188,7 +188,7 @@ impl Pid {
         let theta_base_rad = argument_clamped.acos();
         let theta_base_degrees = theta_base_rad.to_degrees();
 
-        // Transformation pour la plage 90 -> 270
+        // Transformation for the 90 -> 270 range
         // let theta_degrees: u16 = (theta_base_degrees + 180.0).round() as u16;
         let theta_degrees: u16 = (270. - theta_base_degrees).round() as u16;
 
