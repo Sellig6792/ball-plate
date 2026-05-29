@@ -1,13 +1,13 @@
+use crate::utils::draw::upscale_mat;
+use cprint::ceprintln;
 use opencv::core::{Mat, MatTraitConst, MatTraitConstManual};
 use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::rc::Rc;
-use cprint::ceprintln;
 use winit::application::ApplicationHandler;
 use winit::event::WindowEvent;
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
-use crate::utils::draw::upscale_mat;
 
 // Événement personnalisé pour notifier l'application qu'une nouvelle image doit être affichée
 #[derive(Debug)]
@@ -25,7 +25,7 @@ pub struct App {
 
 impl App {
     fn load_new_frame(&mut self, frame: &Mat) {
-        let frame = match upscale_mat(&frame, 2.) {
+        let frame = match upscale_mat(frame, 2.) {
             Ok(mat) => mat,
             Err(e) => {
                 ceprintln!("Error", format!("while upscaling the image: {:?}", e));

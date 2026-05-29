@@ -1,7 +1,7 @@
+use cprint::{cprint, cprintln};
 use serialport::SerialPort;
 use std::io::Write;
 use std::time::Duration;
-use cprint::{cprint, cprintln};
 
 pub struct UsbController {
     pub port: Box<dyn SerialPort>,
@@ -48,15 +48,14 @@ impl UsbController {
         let low_y = (angle_y & 0xFF) as u8;
 
         // Calcul d'une checksum simple (somme des octets)
-        let checksum = high_x.wrapping_add(low_x).wrapping_add(high_y).wrapping_add(low_y);
+        let checksum = high_x
+            .wrapping_add(low_x)
+            .wrapping_add(high_y)
+            .wrapping_add(low_y);
 
         let packet: [u8; 6] = [
-            0xFF,       // En-tête unique
-            high_x,
-            low_x,
-            high_y,
-            low_y,
-            checksum,   // Remplace le 0xFE par la sécurité
+            0xFF, // En-tête unique
+            high_x, low_x, high_y, low_y, checksum, // Remplace le 0xFE par la sécurité
         ];
 
         if let Err(e) = self.send_bytes(&packet) {

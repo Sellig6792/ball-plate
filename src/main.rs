@@ -7,7 +7,6 @@ mod utils;
 use crate::app::UserEvent::ChangeImage;
 use crate::app::{App, UserEvent};
 use crate::utils::Point;
-use crate::utils::draw::upscale_mat;
 use camera::Camera;
 use cprint::{ceprintln, cprintln};
 use opencv::core::MatTraitConst;
@@ -55,10 +54,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // Tâche de traitement caméra et PID
                 tokio::task::spawn_blocking(move || {
                     if let Err(e) = run_camera_capture(tx) {
-                        ceprintln!(
-                            "Error",
-                            format!("while camera capture : {:?}", e)
-                        );
+                        ceprintln!("Error", format!("while camera capture : {:?}", e));
                     }
                 })
                 .await

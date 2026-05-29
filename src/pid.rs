@@ -174,8 +174,7 @@ impl Pid {
 
         if rod <= arm {
             return Err(
-                "Mechanical error: the rod must be strictly longer than the arm."
-                    .to_string(),
+                "Mechanical error: the rod must be strictly longer than the arm.".to_string(),
             );
         }
 
