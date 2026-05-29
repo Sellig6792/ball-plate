@@ -7,6 +7,7 @@ mod utils;
 use crate::app::UserEvent::ChangeImage;
 use crate::app::{App, UserEvent};
 use crate::utils::Point;
+use crate::utils::plot::TelemetryPlot;
 use camera::Camera;
 use cprint::{ceprintln, cprintln};
 use opencv::core::MatTraitConst;
@@ -91,6 +92,11 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     cprintln!("Log", "Capture and control loops started..." => Cyan);
     let mut last_center: Option<Point> = None;
 
+    // Telemetry display setup: Stores 120 historic slices, dimensions 280x140px per grid
+    let mut telemetry_plot = TelemetryPlot::new(120, 280, 140);
+    let mut current_feedback = (180i16, 180i16);
+    let mut current_target = (180u16, 180u16);
+
     // Buffer to accumulate characters received from the Arduino
     #[cfg(not(feature = "arduino-less"))]
     let mut serial_buffer: Vec<u8> = Vec::new();
@@ -99,11 +105,6 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
     loop {
         let start_loop = Instant::now();
-
-        #[cfg(all(not(feature = "arduino-less"), not(feature = "no-feedback")))]
-        if let Some((fb_x, fb_y)) = arduino.read_feedback(&mut serial_buffer) {
-            cprintln!("Arduino", format!("X: {:.2}° ; Y: {:.2}°", fb_x, fb_y));
-        }
 
         if let Err(e) = tx.try_send(frame_mat.clone()) {
             match e {
@@ -123,6 +124,12 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             continue;
         }
 
+        // Process incoming binary telemetry packets from the MCU
+        #[cfg(all(not(feature = "arduino-less"), not(feature = "no-feedback")))]
+        if let Some((fb_x, fb_y)) = arduino.read_feedback(&mut serial_buffer) {
+            current_feedback = (fb_x, fb_y);
+        }
+
         let _ = utils::draw::draw_circle(
             &mut frame_mat,
             &Point::new(pid.center_x_pixel as i32, pid.center_y_pixel as i32),
@@ -135,7 +142,18 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
         match ball {
             Some(_) => {}
-            None => continue,
+            None => {
+                // If tracking is lost, maintain visual stream rendering using historical parameters
+                telemetry_plot.push(
+                    current_target.0 as i16,
+                    current_feedback.0,
+                    current_target.1 as i16,
+                    current_feedback.1,
+                );
+                let _ = telemetry_plot.draw_axis(&mut frame_mat, 20, 20, true);
+                let _ = telemetry_plot.draw_axis(&mut frame_mat, 310, 20, false);
+                continue;
+            }
         }
         let (center, radius) = ball.unwrap();
         cprintln!("Ball", format!("X: {:4.} , Y: {:4.}", center.x, center.y) => Yellow);
@@ -155,9 +173,22 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
         let angle_x = Pid::angle_from_height(command_x)?;
         let angle_y = Pid::angle_from_height(command_y)?;
+        current_target = (angle_x, angle_y);
 
         #[cfg(not(feature = "arduino-less"))]
         arduino.send(angle_x, angle_y);
+
+        // Append updated execution metrics into telemetry records
+        telemetry_plot.push(
+            current_target.0 as i16,
+            current_feedback.0,
+            current_target.1 as i16,
+            current_feedback.1,
+        );
+
+        // Blit telemetry graphs onto the active image frame (Top-Left positioning configuration)
+        let _ = telemetry_plot.draw_axis(&mut frame_mat, 20, 20, true); // X-Axis graph
+        let _ = telemetry_plot.draw_axis(&mut frame_mat, 310, 20, false); // Y-Axis graph
 
         if let Some(last_center_pt) = last_center {
             let dt = start_loop.elapsed().as_secs_f32();

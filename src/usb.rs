@@ -69,8 +69,10 @@ impl UsbController {
         let mut read_buf = [0u8; 64];
 
         // Non-blocking read
-        if let Ok(bytes_read) = self.port.read(&mut read_buf) && bytes_read > 0 {
+        if let Ok(bytes_read) = self.port.read(&mut read_buf) {
+            if bytes_read > 0 {
                 serial_buffer.extend_from_slice(&read_buf[..bytes_read]);
+            }
         }
 
         // Process the buffer (a valid packet requires at least 6 bytes)
