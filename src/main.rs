@@ -100,8 +100,10 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     loop {
         let start_loop = Instant::now();
 
-        #[cfg(not(feature = "arduino-less"))]
-        arduino.println(&mut serial_buffer);
+        #[cfg(all(not(feature = "arduino-less"), not(feature = "no-feedback")))]
+        if let Some((fb_x, fb_y)) = arduino.read_feedback(&mut serial_buffer) {
+            cprintln!("Arduino", format!("X: {:.2}° ; Y: {:.2}°", fb_x, fb_y));
+        }
 
         if let Err(e) = tx.try_send(frame_mat.clone()) {
             match e {
