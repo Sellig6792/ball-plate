@@ -1,22 +1,21 @@
 mod app;
 mod camera;
 mod pid;
+
+#[cfg(not(feature = "arduino-less"))]
 mod usb;
 mod utils;
 
 use crate::app::UserEvent::ChangeImage;
 use crate::app::{App, UserEvent};
 use crate::utils::Point;
-use crate::utils::plot::TelemetryPlot;
 use camera::Camera;
 use cprint::{ceprintln, cprintln};
 use opencv::core::MatTraitConst;
 use opencv::core::{Mat, Scalar};
 use pid::{Axe, Pid};
-use std::env;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use usb::UsbController;
 use winit::event_loop::EventLoop;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -79,13 +78,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::Error>> {
     let mut camera = Camera::init()?;
 
-    let usb_port = env::var("USB_PORT").expect("USB_PORT must be set");
-    let baud_rate: u32 = env::var("USB_BAUD_RATE")
-        .expect("USB_BAUD_RATE must be set")
-        .parse()?;
-
     #[cfg(not(feature = "arduino-less"))]
-    let mut arduino = UsbController::new(&usb_port, baud_rate)?;
+    let mut arduino = usb::UsbController::new(
+        &std::env::var("USB_PORT").expect("USB_PORT must be set"),
+        std::env::var("USB_BAUD_RATE")
+            .expect("USB_BAUD_RATE must be set")
+            .parse()?,
+    )?;
 
     let mut pid = Pid::from_env();
 
@@ -93,12 +92,19 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     let mut last_center: Option<Point> = None;
 
     // Telemetry display setup: Stores 120 historic slices, dimensions 280x140px per grid
-    let mut telemetry_plot = TelemetryPlot::new(120, 280, 140);
+    #[cfg(not(feature = "no-graph"))]
+    let mut telemetry_plot = utils::plot::TelemetryPlot::new(120, 280, 140);
+
+    #[cfg(all(not(feature = "no-graph"), feature = "arduino-less"))]
+    let current_feedback = (180i16, 180i16);
+    #[cfg(all(not(feature = "arduino-less"), not(feature = "no-graph")))]
     let mut current_feedback = (180i16, 180i16);
+
+    #[cfg(not(feature = "no-graph"))]
     let mut current_target = (180u16, 180u16);
 
     // Buffer to accumulate characters received from the Arduino
-    #[cfg(not(feature = "arduino-less"))]
+    #[cfg(all(not(feature = "arduino-less"), not(feature = "no-graph")))]
     let mut serial_buffer: Vec<u8> = Vec::new();
 
     let mut frame_mat = camera.get_frame()?;
@@ -125,7 +131,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         }
 
         // Process incoming binary telemetry packets from the MCU
-        #[cfg(all(not(feature = "arduino-less"), not(feature = "no-feedback")))]
+        #[cfg(all(not(feature = "arduino-less"), not(feature = "no-graph")))]
         if let Some((fb_x, fb_y)) = arduino.read_feedback(&mut serial_buffer) {
             current_feedback = (fb_x, fb_y);
         }
@@ -143,15 +149,18 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         match ball {
             Some(_) => {}
             None => {
-                // If tracking is lost, maintain visual stream rendering using historical parameters
-                telemetry_plot.push(
-                    current_target.0 as i16,
-                    current_feedback.0,
-                    current_target.1 as i16,
-                    current_feedback.1,
-                );
-                let _ = telemetry_plot.draw_axis(&mut frame_mat, 20, 20, true);
-                let _ = telemetry_plot.draw_axis(&mut frame_mat, 310, 20, false);
+                #[cfg(not(feature = "no-graph"))]
+                {
+                    // If tracking is lost, maintain visual stream rendering using historical parameters
+                    telemetry_plot.push(
+                        current_target.0 as i16,
+                        current_feedback.0,
+                        current_target.1 as i16,
+                        current_feedback.1,
+                    );
+                    let _ = telemetry_plot.draw_axis(&mut frame_mat, 20, 20, true);
+                    let _ = telemetry_plot.draw_axis(&mut frame_mat, 310, 20, false);
+                }
                 continue;
             }
         }
@@ -171,14 +180,19 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
         cprintln!("PID", format!("X: {:.2} ; Y: {:.2} ", command_x, command_y) => Magenta);
 
-        let angle_x = Pid::angle_from_height(command_x)?;
-        let angle_y = Pid::angle_from_height(command_y)?;
-        current_target = (angle_x, angle_y);
+        let _angle_x = Pid::angle_from_height(command_x)?;
+        let _angle_y = Pid::angle_from_height(command_y)?;
+
+        #[cfg(not(feature = "no-graph"))]
+        {
+            current_target = (_angle_x, _angle_y);
+        }
 
         #[cfg(not(feature = "arduino-less"))]
-        arduino.send(angle_x, angle_y);
+        arduino.send(_angle_x, _angle_y);
 
         // Append updated execution metrics into telemetry records
+        #[cfg(not(feature = "no-graph"))]
         telemetry_plot.push(
             current_target.0 as i16,
             current_feedback.0,
@@ -187,7 +201,9 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         );
 
         // Blit telemetry graphs onto the active image frame (Top-Left positioning configuration)
+        #[cfg(not(feature = "no-graph"))]
         let _ = telemetry_plot.draw_axis(&mut frame_mat, 20, 20, true); // X-Axis graph
+        #[cfg(not(feature = "no-graph"))]
         let _ = telemetry_plot.draw_axis(&mut frame_mat, 310, 20, false); // Y-Axis graph
 
         if let Some(last_center_pt) = last_center {

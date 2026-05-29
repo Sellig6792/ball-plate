@@ -16,4 +16,4 @@ cprint = { version = "1.0.0", features = ["cprint", "ceprint"]}
 
 [features]
 arduino-less = []
-no-feedback = []
+no-graph = []

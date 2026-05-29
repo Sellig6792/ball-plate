@@ -65,14 +65,15 @@ impl UsbController {
 
     /// Reads the serial port, parses the feedback packet from Arduino (Header: 0xEE)
     /// Returns `Some((angle_x, angle_y))` if a valid packet is processed.
+    #[cfg(not(feature = "no-graph"))]
     pub fn read_feedback(&mut self, serial_buffer: &mut Vec<u8>) -> Option<(i16, i16)> {
         let mut read_buf = [0u8; 64];
 
         // Non-blocking read
-        if let Ok(bytes_read) = self.port.read(&mut read_buf) {
-            if bytes_read > 0 {
-                serial_buffer.extend_from_slice(&read_buf[..bytes_read]);
-            }
+        if let Ok(bytes_read) = self.port.read(&mut read_buf)
+            && bytes_read > 0
+        {
+            serial_buffer.extend_from_slice(&read_buf[..bytes_read]);
         }
 
         // Process the buffer (a valid packet requires at least 6 bytes)
