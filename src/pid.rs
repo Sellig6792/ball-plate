@@ -180,7 +180,7 @@ impl Pid {
         }
 
         let height = (rod - arm) + (2.0 * arm * h);
-        println!("height: {}", height);
+
         // let argument = (height.powi(2) - arm.powi(2) + rod.powi(2)) / (2.0 * rod * height);
         let argument = (height.powi(2) + arm.powi(2) - rod.powi(2)) / (2.0 * arm * height);
         let argument_clamped = argument.clamp(-1.0, 1.0);

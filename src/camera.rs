@@ -4,7 +4,7 @@ use nokhwa::pixel_format::LumaFormat;
 use nokhwa::utils::{
     CameraFormat, CameraIndex, FrameFormat, RequestedFormat, RequestedFormatType, Resolution,
 };
-use opencv::core::{Mat, Point2f, Scalar, Size, Vector, in_range};
+use opencv::core::{Mat, Point2f, Scalar, Size, Vector, in_range, ElemMul, MatTraitConst};
 use opencv::imgcodecs::{IMREAD_COLOR, imdecode};
 use opencv::imgproc::{
     CHAIN_APPROX_SIMPLE, COLOR_BGR2HSV, RETR_EXTERNAL, cvt_color, find_contours, gaussian_blur,
@@ -55,6 +55,7 @@ impl Camera {
     pub fn threshold(image_bgr: &Mat) -> Result<Mat, Box<dyn std::error::Error>> {
         let mut hsv = Mat::default();
         let mut mask = Mat::default();
+
         cvt_color(image_bgr, &mut hsv, COLOR_BGR2HSV, 0)?;
 
         // HSV OpenCV conversion coefficient (0-100% -> 0-255)
@@ -94,7 +95,7 @@ impl Camera {
     ) -> Result<Option<(Point, i32)>, Box<dyn std::error::Error>> {
         let mask = Self::threshold(image_bgr)?;
         let clean_mask = Self::blur(&mask)?;
-
+        if image_bgr.empty() { return Ok(None)}
         let mut contours = Vector::<Vector<opencv::core::Point>>::new();
         find_contours(
             &clean_mask,
@@ -103,6 +104,7 @@ impl Camera {
             CHAIN_APPROX_SIMPLE,
             opencv::core::Point::new(0, 0),
         )?;
+        if clean_mask.empty() { return Ok(None)}
 
         let mut max_area = 0.0;
         let mut best_contour = None;

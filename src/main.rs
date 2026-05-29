@@ -68,8 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut app = App {
         window_graphics: None,
         image_pixels: Vec::new(),
-        img_width: 640 * 2,
-        img_height: 480 * 2,
+        img_width: 640,
+        img_height: 480,
     };
 
     event_loop.run_app(&mut app)?;
@@ -94,7 +94,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
     // Buffer pour accumuler les caractères reçus de l'Arduino
     #[cfg(not(feature = "arduino-less"))]
-    let mut serial_buffer = Vec::new();
+    let mut serial_buffer: Vec<u8> = Vec::new();
 
     let mut frame_mat = camera.get_frame()?;
 
