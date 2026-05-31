@@ -58,6 +58,21 @@ pub fn draw_vector(edges_map: &mut Mat, origin: Point, destination: Point) -> Re
     Ok(())
 }
 
+pub fn draw_line(
+    img: &mut Mat,
+    pt1: Point,
+    pt2: Point,
+    color: Scalar,
+) -> Result<(), Error> {
+    let thickness = 1;
+    let line_type = imgproc::LINE_8;
+    let shift = 0;
+
+    imgproc::line(img, CvPoint::new(pt1.x, pt1.y), CvPoint::new(pt2.x, pt2.y), color, thickness, line_type, shift)
+        .map_err(|e| e)
+}
+
+
 pub fn upscale_mat(src: &mut Mat) -> Result<(), Error> {
     let upscale_factor: f64 = env::var("UPSCALE_FACTOR")
         .expect("UPSCALE_FACTOR not set in .env")
@@ -72,7 +87,6 @@ pub fn upscale_mat(src: &mut Mat) -> Result<(), Error> {
 
     imgproc::resize(src, &mut dst, target_size, 0.0, 0.0, imgproc::INTER_CUBIC)?;
 
-    // CORRECTION : On copie le résultat final dans la matrice d'origine
     dst.copy_to(src)?;
 
     Ok(())

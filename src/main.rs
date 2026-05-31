@@ -161,6 +161,32 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             Scalar::new(197.0, 73.0, 137.0, 0.0),
         );
 
+        let plate_width: i32 = std::env::var("PLATE_WIDTH_PIXELS")
+            .expect("PLATE_WIDTH_PIXELS must be set in .env")
+            .parse()
+            .expect("PLATE_WIDTH_PIXELS must be a valid integer");
+
+        let window_width = frame_mat.cols();
+        let frame_height = frame_mat.rows();
+
+        let x_1 = (window_width - plate_width) / 2; // left side of the plate
+        let x_2 = x_1 + plate_width; // right side of the plate
+
+
+        let _ = utils::draw::draw_line(
+            &mut frame_mat,
+            Point::new(x_1, 0),
+            Point::new(x_1, frame_height),
+            Scalar::new(0.0, 0.0, 0.0, 0.0),
+        );
+
+        let _ = utils::draw::draw_line(
+            &mut frame_mat,
+            Point::new(x_2, 0),
+            Point::new(x_2, frame_height),
+            Scalar::new(0.0, 0.0, 0.0, 0.0),
+        );
+
         let ball = camera.get_circle(&frame_mat)?;
 
         match ball {
