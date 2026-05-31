@@ -31,7 +31,7 @@ impl PidState {
 }
 
 pub struct Pid {
-    config: PidConfig,
+    pub config: PidConfig,
     state_x: PidState,
     state_y: PidState,
     pub center_x_pixel: f32,

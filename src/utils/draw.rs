@@ -3,7 +3,7 @@ use opencv::core::{Mat, Scalar};
 use opencv::core::{MatTraitConst, Point as CvPoint, Size};
 use opencv::imgproc;
 use std::env;
-
+use crate::pid::Pid;
 use crate::utils::Point;
 
 pub enum CircleType {
@@ -30,20 +30,12 @@ pub fn draw_circle(
 }
 
 pub fn draw_vector(edges_map: &mut Mat, origin: Point, destination: Point) -> Result<(), Error> {
-    // 1. Convert your custom Point to OpenCV's Point
-    let origin_point = CvPoint::new(origin.x, origin.y);
-    let destination_point = CvPoint::new(destination.x, destination.y);
 
-    // 2. Use the built-in line function
-    // Scalar is (B, G, R, A)
-    imgproc::line(
+    draw_line(
         edges_map,
-        origin_point,
-        destination_point,
+        origin,
+        destination.clone(),
         Scalar::new(255.0, 255.0, 0.0, 0.0), // Cyan
-        1,                                   //
-        imgproc::LINE_8,                     // Line type
-        0,                                   // Shift (fractional bits)
     )?;
 
     // 2. Draw a red circle at the destination point
@@ -90,4 +82,26 @@ pub fn upscale_mat(src: &mut Mat) -> Result<(), Error> {
     dst.copy_to(src)?;
 
     Ok(())
+}
+
+pub fn draw_plate_guidelines(frame_mat: &mut Mat, pid: &Pid) {
+    let _ = draw_circle(
+        frame_mat,
+        &Point::new(pid.center_x_pixel as i32, pid.center_y_pixel as i32),
+        2,
+        CircleType::Point,
+        Scalar::new(197.0, 73.0, 137.0, 0.0),
+    );
+
+    if let Ok(plate_width_str) = std::env::var("PLATE_WIDTH_PIXELS") {
+        if let Ok(plate_width) = plate_width_str.parse::<i32>() {
+            let window_width = frame_mat.cols();
+            let frame_height = frame_mat.rows();
+            let x_1 = (window_width - plate_width) / 2;
+            let x_2 = x_1 + plate_width;
+
+            let _ = draw_line(frame_mat, Point::new(x_1, 0), Point::new(x_1, frame_height), Scalar::new(0.0, 0.0, 0.0, 0.0));
+            let _ = draw_line(frame_mat, Point::new(x_2, 0), Point::new(x_2, frame_height), Scalar::new(0.0, 0.0, 0.0, 0.0));
+        }
+    }
 }

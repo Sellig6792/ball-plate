@@ -216,4 +216,9 @@ impl TelemetryGraph {
 
         Ok(())
     }
+
+    pub fn log_and_draw(&mut self, frame: &mut Mat, target: (u16, u16), feedback: (i16, i16)) {
+        self.push(target.0 as i16, feedback.0, target.1 as i16, feedback.1);
+        let _ = self.draw(frame);
+    }
 }

@@ -102,18 +102,12 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     let mut last_center: Option<Point> = None;
 
     // --- ENVIRONMENT CONFIGURATIONS FOR TELEMETRY PLOT ---
-    // Grabs dimensions for drawing graph boxes from environment variables
     #[cfg(not(feature = "no-graph"))]
-    let graph_width: i32 = std::env::var("GRAPH_WIDTH")
-        .unwrap_or_else(|_| "250".to_string())
-        .parse()?;
-    #[cfg(not(feature = "no-graph"))]
-    let graph_height: i32 = std::env::var("GRAPH_HEIGHT")
-        .unwrap_or_else(|_| "125".to_string())
-        .parse()?;
-
-    #[cfg(not(feature = "no-graph"))]
-    let mut telemetry_plot = utils::graph::TelemetryGraph::new(120, graph_width, graph_height);
+    let mut telemetry_plot = {
+        let width: i32 = std::env::var("GRAPH_WIDTH").unwrap_or_else(|_| "250".to_string()).parse()?;
+        let height: i32 = std::env::var("GRAPH_HEIGHT").unwrap_or_else(|_| "125".to_string()).parse()?;
+        utils::graph::TelemetryGraph::new(120, width, height)
+    };
     // -----------------------------------------------------
 
     #[cfg(all(not(feature = "no-graph"), feature = "arduino-less"))]
@@ -128,22 +122,20 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     let mut serial_buffer: Vec<u8> = Vec::new();
 
     let mut frame_mat = camera.get_frame()?;
+    let mut last_loop_time = Instant::now();
 
     loop {
         let start_loop = Instant::now();
+        let dt = last_loop_time.elapsed().as_secs_f32();
+        last_loop_time = start_loop;
+        pid.config.dt = if dt > 0.0 { dt } else { 0.01 };
 
-        if let Err(e) = tx.try_send(frame_mat.clone()) {
-            match e {
-                mpsc::error::TrySendError::Full(_) => {}
-                mpsc::error::TrySendError::Closed(_) => {
-                    cprintln!("Log", "The graphical receiver was closed. Stopping." => Cyan);
-                    break;
-                }
-            }
+        if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(frame_mat.clone()) {
+            cprintln!("Log", "The graphical receiver was closed. Stopping." => Cyan);
+            break;
         }
 
         frame_mat = camera.get_frame()?;
-
         if frame_mat.empty() {
             continue;
         }
@@ -153,59 +145,16 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             current_feedback = (fb_x, fb_y);
         }
 
-        let _ = utils::draw::draw_circle(
-            &mut frame_mat,
-            &Point::new(pid.center_x_pixel as i32, pid.center_y_pixel as i32),
-            2,
-            utils::draw::CircleType::Point,
-            Scalar::new(197.0, 73.0, 137.0, 0.0),
-        );
-
-        let plate_width: i32 = std::env::var("PLATE_WIDTH_PIXELS")
-            .expect("PLATE_WIDTH_PIXELS must be set in .env")
-            .parse()
-            .expect("PLATE_WIDTH_PIXELS must be a valid integer");
-
-        let window_width = frame_mat.cols();
-        let frame_height = frame_mat.rows();
-
-        let x_1 = (window_width - plate_width) / 2; // left side of the plate
-        let x_2 = x_1 + plate_width; // right side of the plate
-
-
-        let _ = utils::draw::draw_line(
-            &mut frame_mat,
-            Point::new(x_1, 0),
-            Point::new(x_1, frame_height),
-            Scalar::new(0.0, 0.0, 0.0, 0.0),
-        );
-
-        let _ = utils::draw::draw_line(
-            &mut frame_mat,
-            Point::new(x_2, 0),
-            Point::new(x_2, frame_height),
-            Scalar::new(0.0, 0.0, 0.0, 0.0),
-        );
+        // Call the helper function relocated to utils::draw
+        utils::draw::draw_plate_guidelines(&mut frame_mat, &pid);
 
         let ball = camera.get_circle(&frame_mat)?;
-
-        match ball {
-            Some(_) => {}
-            None => {
-                #[cfg(not(feature = "no-graph"))]
-                {
-                    telemetry_plot.push(
-                        current_target.0 as i16,
-                        current_feedback.0,
-                        current_target.1 as i16,
-                        current_feedback.1,
-                    );
-
-                    let _ = telemetry_plot.draw(&mut frame_mat);
-                }
-                continue;
-            }
+        if ball.is_none() {
+            #[cfg(not(feature = "no-graph"))]
+            telemetry_plot.log_and_draw(&mut frame_mat, current_target, current_feedback);
+            continue;
         }
+
         let (center, radius) = ball.unwrap();
         cprintln!("Ball", format!("X: {:4.} , Y: {:4.}", center.x, center.y) => Yellow);
 
@@ -219,7 +168,6 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
         let command_x = pid.calculate_inclination(Axe::X, center.x as f32);
         let command_y = pid.calculate_inclination(Axe::Y, center.y as f32);
-
         cprintln!("PID", format!("X: {:.2} ; Y: {:.2} ", command_x, command_y) => Magenta);
 
         let _angle_x = Pid::angle_from_height(command_x)?;
@@ -228,24 +176,13 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         #[cfg(not(feature = "no-graph"))]
         {
             current_target = (_angle_x, _angle_y);
+            telemetry_plot.log_and_draw(&mut frame_mat, current_target, current_feedback);
         }
 
         #[cfg(not(feature = "arduino-less"))]
         arduino.send(_angle_x, _angle_y);
 
-        #[cfg(not(feature = "no-graph"))]
-        telemetry_plot.push(
-            current_target.0 as i16,
-            current_feedback.0,
-            current_target.1 as i16,
-            current_feedback.1,
-        );
-
-        #[cfg(not(feature = "no-graph"))]
-        let _ = telemetry_plot.draw(&mut frame_mat);
-
         if let Some(last_center_pt) = last_center {
-            let dt = start_loop.elapsed().as_secs_f32();
             let in_a_second = utils::computing::in_a_second(last_center_pt, center.clone(), dt);
             let _ = utils::draw::draw_vector(&mut frame_mat, center.clone(), in_a_second);
         }
