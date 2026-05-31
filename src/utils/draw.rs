@@ -2,6 +2,7 @@ use opencv::Error;
 use opencv::core::{Mat, Scalar};
 use opencv::core::{MatTraitConst, Point as CvPoint, Size};
 use opencv::imgproc;
+use std::env;
 
 use crate::utils::Point;
 
@@ -57,24 +58,22 @@ pub fn draw_vector(edges_map: &mut Mat, origin: Point, destination: Point) -> Re
     Ok(())
 }
 
-pub fn upscale_mat(src: &Mat, scale: f64) -> Result<Mat, Error> {
-    // 1. Initialize an empty destination matrix
+pub fn upscale_mat(src: &mut Mat) -> Result<(), Error> {
+    let upscale_factor: f64 = env::var("UPSCALE_FACTOR")
+        .expect("UPSCALE_FACTOR not set in .env")
+        .parse()
+        .expect("UPSCALE_FACTOR must be a valid f64");
+
     let mut dst = Mat::default();
 
-    // 2. Calculate the new target dimensions
-    let new_width = (src.cols() as f64 * scale).round() as i32;
-    let new_height = (src.rows() as f64 * scale).round() as i32;
+    let new_width = (src.cols() as f64 * upscale_factor).round() as i32;
+    let new_height = (src.rows() as f64 * upscale_factor).round() as i32;
     let target_size = Size::new(new_width, new_height);
 
-    // 3. Apply resizing
-    imgproc::resize(
-        src,
-        &mut dst,
-        target_size,
-        0.0,
-        0.0,
-        imgproc::INTER_CUBIC, // Optimal algorithm for upscaling
-    )?;
+    imgproc::resize(src, &mut dst, target_size, 0.0, 0.0, imgproc::INTER_CUBIC)?;
 
-    Ok(dst)
+    // CORRECTION : On copie le résultat final dans la matrice d'origine
+    dst.copy_to(src)?;
+
+    Ok(())
 }

@@ -14,6 +14,7 @@ use cprint::{ceprintln, cprintln};
 use opencv::core::MatTraitConst;
 use opencv::core::{Mat, Scalar};
 use pid::{Axe, Pid};
+use std::env;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use winit::event_loop::EventLoop;
@@ -23,12 +24,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. READ ENVIRONMENT CONFIGURATIONS FOR WINDOW RESOLUTION
     // If not set in .env, defaults to standard 2x scaling configurations (1280x960)
-    let img_width: i32 = std::env::var("WINDOW_WIDTH")
-        .unwrap_or_else(|_| "1280".to_string())
-        .parse()?;
-    let img_height: i32 = std::env::var("WINDOW_HEIGHT")
-        .unwrap_or_else(|_| "960".to_string())
-        .parse()?;
+    let window_res_vec = env::var("WINDOW_RESOLUTION")
+        .expect("WINDOW_RESOLUTION must be set in .env")
+        .split("x")
+        .map(|x| {
+            x.parse::<u32>()
+                .expect("WINDOW_RESOLUTION is not a valid [u32]x[u32]")
+        })
+        .collect::<Vec<u32>>();
 
     // 2. WINIT INITIALIZATION (Main thread)
     let event_loop: EventLoop<UserEvent> = EventLoop::with_user_event().build()?;
@@ -73,9 +76,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 4. LAUNCHING THE GRAPHICAL APPLICATION (Using parsed variables)
     let mut app = App {
         window_graphics: None,
-        image_pixels: Vec::new(),
-        img_width: img_width as u32,
-        img_height: img_height as u32,
+        pixels: Vec::new(),
+        width: window_res_vec[0],
+        height: window_res_vec[1],
     };
 
     event_loop.run_app(&mut app)?;
@@ -110,7 +113,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
         .parse()?;
 
     #[cfg(not(feature = "no-graph"))]
-    let mut telemetry_plot = utils::plot::TelemetryPlot::new(120, graph_width, graph_height);
+    let mut telemetry_plot = utils::graph::TelemetryGraph::new(120, graph_width, graph_height);
     // -----------------------------------------------------
 
     #[cfg(all(not(feature = "no-graph"), feature = "arduino-less"))]

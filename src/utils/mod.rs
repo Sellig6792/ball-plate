@@ -3,7 +3,7 @@ pub mod computing;
 pub mod draw;
 
 #[cfg(not(feature = "no-graph"))]
-pub mod plot;
+pub mod graph;
 mod point;
 
 pub use point::Point;
