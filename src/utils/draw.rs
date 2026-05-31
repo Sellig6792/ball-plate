@@ -2,7 +2,8 @@ use opencv::Error;
 use opencv::core::{Mat, Scalar};
 use opencv::core::{MatTraitConst, Point as CvPoint, Size};
 use opencv::imgproc;
-
+use std::env;
+use crate::pid::Pid;
 use crate::utils::Point;
 
 pub enum CircleType {
@@ -29,20 +30,12 @@ pub fn draw_circle(
 }
 
 pub fn draw_vector(edges_map: &mut Mat, origin: Point, destination: Point) -> Result<(), Error> {
-    // 1. Convert your custom Point to OpenCV's Point
-    let origin_point = CvPoint::new(origin.x, origin.y);
-    let destination_point = CvPoint::new(destination.x, destination.y);
 
-    // 2. Use the built-in line function
-    // Scalar is (B, G, R, A)
-    imgproc::line(
+    draw_line(
         edges_map,
-        origin_point,
-        destination_point,
+        origin,
+        destination.clone(),
         Scalar::new(255.0, 255.0, 0.0, 0.0), // Cyan
-        1,                                   //
-        imgproc::LINE_8,                     // Line type
-        0,                                   // Shift (fractional bits)
     )?;
 
     // 2. Draw a red circle at the destination point
@@ -57,24 +50,58 @@ pub fn draw_vector(edges_map: &mut Mat, origin: Point, destination: Point) -> Re
     Ok(())
 }
 
-pub fn upscale_mat(src: &Mat, scale: f64) -> Result<Mat, Error> {
-    // 1. Initialize an empty destination matrix
+pub fn draw_line(
+    img: &mut Mat,
+    pt1: Point,
+    pt2: Point,
+    color: Scalar,
+) -> Result<(), Error> {
+    let thickness = 1;
+    let line_type = imgproc::LINE_8;
+    let shift = 0;
+
+    imgproc::line(img, CvPoint::new(pt1.x, pt1.y), CvPoint::new(pt2.x, pt2.y), color, thickness, line_type, shift)
+        .map_err(|e| e)
+}
+
+
+pub fn upscale_mat(src: &mut Mat) -> Result<(), Error> {
+    let upscale_factor: f64 = env::var("UPSCALE_FACTOR")
+        .expect("UPSCALE_FACTOR not set in .env")
+        .parse()
+        .expect("UPSCALE_FACTOR must be a valid f64");
+
     let mut dst = Mat::default();
 
-    // 2. Calculate the new target dimensions
-    let new_width = (src.cols() as f64 * scale).round() as i32;
-    let new_height = (src.rows() as f64 * scale).round() as i32;
+    let new_width = (src.cols() as f64 * upscale_factor).round() as i32;
+    let new_height = (src.rows() as f64 * upscale_factor).round() as i32;
     let target_size = Size::new(new_width, new_height);
 
-    // 3. Apply resizing
-    imgproc::resize(
-        src,
-        &mut dst,
-        target_size,
-        0.0,
-        0.0,
-        imgproc::INTER_CUBIC, // Optimal algorithm for upscaling
-    )?;
+    imgproc::resize(src, &mut dst, target_size, 0.0, 0.0, imgproc::INTER_CUBIC)?;
 
-    Ok(dst)
+    dst.copy_to(src)?;
+
+    Ok(())
+}
+
+pub fn draw_plate_guidelines(frame_mat: &mut Mat, pid: &Pid) {
+    let _ = draw_circle(
+        frame_mat,
+        &Point::new(pid.center_x_pixel as i32, pid.center_y_pixel as i32),
+        2,
+        CircleType::Point,
+        Scalar::new(197.0, 73.0, 137.0, 0.0),
+    );
+
+    if let Ok(plate_width_str) = std::env::var("PLATE_WIDTH_PIXELS") {
+        if let Ok(plate_width) = plate_width_str.parse::<i32>() {
+            let window_width = frame_mat.cols();
+            let frame_height = frame_mat.rows();
+            let x_1 = (window_width - plate_width) / 2;
+            let x_2 = x_1 + plate_width;
+
+            let _ = draw_line(frame_mat, Point::new(x_1, 0), Point::new(x_1, frame_height), Scalar::new(0.0, 0.0, 0.0, 0.0));
+            let _ = draw_line(frame_mat, Point::new(x_2, 0), Point::new(x_2, frame_height), Scalar::new(0.0, 0.0, 0.0, 0.0));
+        }
+    }
 }

@@ -17,7 +17,7 @@ pub struct Camera {
 }
 
 impl Camera {
-    /// Initialize the camera with resolution and framerate from .env file
+    /// Initialize the camera with resolution and framerate from the .env file
     pub fn init() -> Result<Self, NokhwaError> {
         let index = CameraIndex::Index(0);
         let frame_rate: u32 = env::var("FRAME_RATE")
@@ -25,12 +25,15 @@ impl Camera {
             .parse()
             .expect("FRAME_RATE is not a valid u32");
 
-        let res_vec = env::var("RESOLUTION")
-            .expect("RESOLUTION must be set in .env")
+        let camera_res_vec = env::var("CAMERA_RESOLUTION")
+            .expect("CAMERA_RESOLUTION must be set in .env")
             .split("x")
-            .map(|x| x.parse::<u32>().expect("RESOLUTION is not a valid u32"))
+            .map(|x| {
+                x.parse::<u32>()
+                    .expect("CAMERA_RESOLUTION is not a valid [u32]x[u32]")
+            })
             .collect::<Vec<u32>>();
-        let resolution = Resolution::new(res_vec[0], res_vec[1]);
+        let resolution = Resolution::new(camera_res_vec[0], camera_res_vec[1]);
 
         let requested = RequestedFormat::new::<LumaFormat>(RequestedFormatType::Exact(
             CameraFormat::new(resolution, FrameFormat::MJPEG, frame_rate),
@@ -88,7 +91,7 @@ impl Camera {
         Ok(blurred)
     }
 
-    /// Analyze contours to calculate the center (X,Y) and radius of the ball
+    /// Analyze contours to calculate, the center (X,Y) and radius of the ball
     pub fn get_circle(
         &self,
         image_bgr: &Mat,
