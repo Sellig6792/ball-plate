@@ -97,8 +97,6 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     )?;
 
     let mut pid = Pid::from_env();
-
-    cprintln!("Log", "Capture and control loops started..." => Cyan);
     let mut last_center: Option<Point> = None;
 
     // --- ENVIRONMENT CONFIGURATIONS FOR TELEMETRY PLOT ---
@@ -111,7 +109,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     // -----------------------------------------------------
 
     #[cfg(all(not(feature = "no-graph"), feature = "arduino-less"))]
-    let current_feedback = (180i16, 180i16);
+    let mut current_feedback = (180i16, 180i16);
     #[cfg(all(not(feature = "arduino-less"), not(feature = "no-graph")))]
     let mut current_feedback = (180i16, 180i16);
 
@@ -123,6 +121,7 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
     let mut frame_mat = camera.get_frame()?;
     let mut last_loop_time = Instant::now();
+    cprintln!("Log", "Capture and control loops started..." => Cyan);
 
     loop {
         let start_loop = Instant::now();
@@ -145,50 +144,71 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             current_feedback = (fb_x, fb_y);
         }
 
-        // Call the helper function relocated to utils::draw
-        utils::draw::draw_plate_guidelines(&mut frame_mat, &pid);
-
-        let ball = camera.get_circle(&frame_mat)?;
-        if ball.is_none() {
-            #[cfg(not(feature = "no-graph"))]
-            telemetry_plot.log_and_draw(&mut frame_mat, current_target, current_feedback);
-            continue;
-        }
-
-        let (center, radius) = ball.unwrap();
-        cprintln!("Ball", format!("X: {:4.} , Y: {:4.}", center.x, center.y) => Yellow);
-
-        let _ = utils::draw::draw_circle(
+        // Forward raw items to our frame processor
+        process_frame(
             &mut frame_mat,
-            &center,
-            radius,
-            utils::draw::CircleType::Circle,
-            Scalar::new(0.0, 255.0, 0.0, 0.0),
-        );
-
-        let command_x = pid.calculate_inclination(Axe::X, center.x as f32);
-        let command_y = pid.calculate_inclination(Axe::Y, center.y as f32);
-        cprintln!("PID", format!("X: {:.2} ; Y: {:.2} ", command_x, command_y) => Magenta);
-
-        let _angle_x = Pid::angle_from_height(command_x)?;
-        let _angle_y = Pid::angle_from_height(command_y)?;
-
-        #[cfg(not(feature = "no-graph"))]
-        {
-            current_target = (_angle_x, _angle_y);
-            telemetry_plot.log_and_draw(&mut frame_mat, current_target, current_feedback);
-        }
-
-        #[cfg(not(feature = "arduino-less"))]
-        arduino.send(_angle_x, _angle_y);
-
-        if let Some(last_center_pt) = last_center {
-            let in_a_second = utils::computing::in_a_second(last_center_pt, center.clone(), dt);
-            let _ = utils::draw::draw_vector(&mut frame_mat, center.clone(), in_a_second);
-        }
-        last_center = Some(center);
+            &mut camera,
+            &mut pid,
+            &mut last_center,
+            dt,
+            #[cfg(not(feature = "no-graph"))] &mut telemetry_plot,
+            #[cfg(not(feature = "no-graph"))] &mut current_target,
+            #[cfg(not(feature = "no-graph"))] current_feedback,
+            #[cfg(not(feature = "arduino-less"))] &mut arduino,
+        )?;
     }
 
     camera.close().expect("Error while closing the camera");
+    Ok(())
+}
+
+/// Extracted helper to isolate the processing loop mechanics
+fn process_frame(
+    frame_mat: &mut Mat,
+    camera: &mut Camera,
+    pid: &mut Pid,
+    last_center: &mut Option<Point>,
+    dt: f32,
+    #[cfg(not(feature = "no-graph"))] telemetry_plot: &mut utils::graph::TelemetryGraph,
+    #[cfg(not(feature = "no-graph"))] current_target: &mut (u16, u16),
+    #[cfg(not(feature = "no-graph"))] current_feedback: (i16, i16),
+    #[cfg(not(feature = "arduino-less"))] arduino: &mut usb::UsbController,
+) -> Result<(), Box<dyn std::error::Error>> {
+    utils::draw::draw_plate_guidelines(frame_mat, pid);
+
+    let ball = camera.get_circle(frame_mat)?;
+    if ball.is_none() {
+        #[cfg(not(feature = "no-graph"))]
+        telemetry_plot.log_and_draw(frame_mat, *current_target, current_feedback);
+        return Ok(());
+    }
+
+    let (center, radius) = ball.unwrap();
+    cprintln!("Ball", format!("X: {:4.} , Y: {:4.}", center.x, center.y) => Yellow);
+
+    let _ = utils::draw::draw_circle(frame_mat, &center, radius, utils::draw::CircleType::Circle, Scalar::new(0.0, 255.0, 0.0, 0.0));
+
+    let command_x = pid.calculate_inclination(Axe::X, center.x as f32);
+    let command_y = pid.calculate_inclination(Axe::Y, center.y as f32);
+    cprintln!("PID", format!("X: {:.2} ; Y: {:.2} ==> dt: {:.2}", command_x, command_y, dt) => Magenta);
+
+    let angle_x = Pid::angle_from_height(command_x)?;
+    let angle_y = Pid::angle_from_height(command_y)?;
+
+    #[cfg(not(feature = "no-graph"))]
+    {
+        *current_target = (angle_x, angle_y);
+        telemetry_plot.log_and_draw(frame_mat, *current_target, current_feedback);
+    }
+
+    #[cfg(not(feature = "arduino-less"))]
+    arduino.send(angle_x, angle_y);
+
+    if let Some(last_center_pt) = *last_center {
+        let in_a_second = utils::computing::in_a_second(last_center_pt, center.clone(), dt);
+        let _ = utils::draw::draw_vector(frame_mat, center.clone(), in_a_second);
+    }
+    *last_center = Some(center);
+
     Ok(())
 }
