@@ -7,6 +7,7 @@ This submodule contains the main control application written in Rust. It serves 
 * **PID Control Loop:** Processes the position data to compute the required adjustments and angles needed to counteract gravity and stabilize the ball.
 * **Serial Communication:** Sends the computed target angles to the Arduino driver via serial interface.
 * **GUI & Visualization:** Displays a live window showing the tracked ball, its trajectory, and real-time graphs plotting the servomotor angles.
+* **Interactive Target Routing (GUI Input):** Manages dynamic setpoint overrides in real-time using mouse inputs (Left click to chain waypoints, Right-click and drag for an instant live target path, and Middle click to purge the queue and reset the target to the center).
 
 ## 🔧 Prerequisites & Setup
 
