@@ -17,66 +17,26 @@ use pid::{Axe, Pid};
 use std::env;
 use std::time::Instant;
 use tokio::sync::mpsc;
-use winit::event_loop::EventLoop;
+use winit::event_loop::{EventLoop, EventLoopProxy};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
-    // 1. READ ENVIRONMENT CONFIGURATIONS FOR WINDOW RESOLUTION
     let window_res_vec = env::var("WINDOW_RESOLUTION")
         .expect("WINDOW_RESOLUTION must be set in .env")
         .split("x")
-        .map(|x| {
-            x.parse::<u32>()
-                .expect("WINDOW_RESOLUTION is not a valid [u32]x[u32]")
-        })
+        .map(|x| x.parse::<u32>().expect("WINDOW_RESOLUTION is invalid"))
         .collect::<Vec<u32>>();
 
-    // 2. WINIT INITIALIZATION (Main thread)
     let event_loop: EventLoop<UserEvent> = EventLoop::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
-
-    // Create the crossbeam channel using the customized message variant type
     let (click_tx, click_rx) = crossbeam_channel::unbounded::<TargetMessage>();
 
-    // 3. STARTING TOKIO IN A DEDICATED THREAD
-    std::thread::spawn({
-        let proxy = proxy.clone();
-        let click_rx = click_rx.clone();
-
-        move || {
-            let rt = tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .build()
-                .unwrap();
-
-            rt.block_on(async move {
-                let (tx, mut rx) = mpsc::channel::<Mat>(100);
-
-                let update_app = proxy.clone();
-                tokio::spawn(async move {
-                    while let Some(frame) = rx.recv().await {
-                        let proxy_task = update_app.clone();
-
-                        let _ = tokio::task::spawn_blocking(move || {
-                            let _ = proxy_task.send_event(ChangeImage(frame));
-                        })
-                        .await;
-                    }
-                });
-
-                tokio::task::spawn_blocking(move || {
-                    if let Err(e) = run_camera_capture(tx, click_rx) {
-                        ceprintln!("Error", format!("while camera capture: {:?}", e));
-                    }
-                })
-                .await
-                .unwrap();
-            });
-        }
+    // Extracted into a clean, flat thread spawn
+    std::thread::spawn(move || {
+        start_async_runtime(proxy, click_rx);
     });
 
-    // 4. LAUNCHING THE GRAPHICAL APPLICATION
     let mut app = App {
         window_graphics: None,
         pixels: Vec::new(),
@@ -90,6 +50,42 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     event_loop.run_app(&mut app)?;
     Ok(())
+}
+
+/// Helper to dramatically reduce nesting complexity inside main()
+fn start_async_runtime(
+    proxy: EventLoopProxy<UserEvent>,
+    click_rx: crossbeam_channel::Receiver<TargetMessage>,
+) {
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .unwrap();
+
+    rt.block_on(async move {
+        let (tx, mut rx) = mpsc::channel::<Mat>(100);
+
+        // UI Frame updater task
+        let update_app = proxy.clone();
+        tokio::spawn(async move {
+            while let Some(frame) = rx.recv().await {
+                let proxy_task = update_app.clone();
+                let _ = tokio::task::spawn_blocking(move || {
+                    let _ = proxy_task.send_event(ChangeImage(frame));
+                })
+                .await;
+            }
+        });
+
+        // Heavy blocking capture task
+        tokio::task::spawn_blocking(move || {
+            if let Err(e) = run_camera_capture(tx, click_rx) {
+                ceprintln!("Error", format!("while camera capture: {:?}", e));
+            }
+        })
+        .await
+        .unwrap();
+    });
 }
 
 fn run_camera_capture(
@@ -109,7 +105,6 @@ fn run_camera_capture(
     let mut pid = Pid::from_env();
     let mut last_center: Option<Point> = None;
 
-    // --- ENVIRONMENT CONFIGURATIONS FOR TELEMETRY PLOT ---
     #[cfg(not(feature = "no-graph"))]
     let mut telemetry_plot = {
         let width: i32 = env::var("GRAPH_WIDTH")
@@ -120,16 +115,13 @@ fn run_camera_capture(
             .parse()?;
         utils::graph::TelemetryGraph::new(120, width, height)
     };
-    // -----------------------------------------------------
 
     #[cfg(all(not(feature = "no-graph"), feature = "arduino-less"))]
     let mut current_feedback = (180i16, 180i16);
     #[cfg(all(not(feature = "arduino-less"), not(feature = "no-graph")))]
     let mut current_feedback = (180i16, 180i16);
-
     #[cfg(not(feature = "no-graph"))]
     let mut current_target = (180u16, 180u16);
-
     #[cfg(all(not(feature = "arduino-less"), not(feature = "no-graph")))]
     let mut serial_buffer: Vec<u8> = Vec::new();
 
@@ -138,33 +130,13 @@ fn run_camera_capture(
     cprintln!("Log", "Capture and control loops started..." => Cyan);
 
     loop {
-        println!("{:?}", pid.target_queue.len());
-
         let start_loop = Instant::now();
         let dt = last_loop_time.elapsed().as_secs_f32();
         last_loop_time = start_loop;
         pid.config.dt = if dt > 0.0 { dt } else { 0.01 };
 
-        // Process matching incoming mouse actions
-        while let Ok(message) = click_rx.try_recv() {
-            match message {
-                TargetMessage::AppendWaypoint(clicked_point) => {
-                    pid.target_queue.push_back(clicked_point);
-                    if pid.center == pid.target {
-                        pid.target = pid.target_queue.pop_front().unwrap().clone();
-                    }
-                }
-                TargetMessage::InstantTarget(clicked_point) => {
-                    pid.target_queue.clear();
-                    pid.target = clicked_point;
-                }
-                TargetMessage::ResetToCenter => {
-                    // Reset behavior: clean queue and reset targets directly back onto the safe plate center
-                    pid.target_queue.clear();
-                    pid.target = pid.center.clone();
-                }
-            }
-        }
+        // Extracted local logic to process target inputs clearly
+        handle_incoming_messages(&click_rx, &mut pid);
 
         if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(frame_mat.clone()) {
             cprintln!("Log", "The graphical receiver was closed. Stopping." => Cyan);
@@ -181,7 +153,6 @@ fn run_camera_capture(
             current_feedback = (fb_x, fb_y);
         }
 
-        // Forward raw items to our frame processor
         process_frame(
             &mut frame_mat,
             &mut camera,
@@ -201,6 +172,28 @@ fn run_camera_capture(
 
     camera.close().expect("Error while closing the camera");
     Ok(())
+}
+
+/// Extracted helper to isolate input stream evaluations out of the main loop block
+fn handle_incoming_messages(click_rx: &crossbeam_channel::Receiver<TargetMessage>, pid: &mut Pid) {
+    while let Ok(message) = click_rx.try_recv() {
+        match message {
+            TargetMessage::AppendWaypoint(clicked_point) => {
+                pid.target_queue.push_back(clicked_point);
+                if pid.center == pid.target {
+                    pid.target = pid.target_queue.pop_front().unwrap();
+                }
+            }
+            TargetMessage::InstantTarget(clicked_point) => {
+                pid.target_queue.clear();
+                pid.target = clicked_point;
+            }
+            TargetMessage::ResetToCenter => {
+                pid.target_queue.clear();
+                pid.target = pid.center;
+            }
+        }
+    }
 }
 
 fn process_frame(
@@ -229,7 +222,7 @@ fn process_frame(
     if pid.center != pid.target {
         let _ = utils::draw::draw_circle(
             frame_mat,
-            pid.target.clone(),
+            pid.target,
             4,
             utils::draw::CircleType::Point,
             Scalar::new(255.0, 50.0, 50.0, 0.0),
@@ -245,12 +238,13 @@ fn process_frame(
 
     let (center, radius) = ball.unwrap();
     cprintln!("Ball", format!("X: {:4.} , Y: {:4.}", center.x, center.y) => Yellow);
+    cprintln!("Target", format!("X: {:4.} , Y: {:4.}", pid.target.x, pid.target.y) => BrightRed);
 
     pid.update_trajectory_target(&center);
 
     let _ = utils::draw::draw_circle(
         frame_mat,
-        center.clone(),
+        center,
         radius,
         utils::draw::CircleType::Circle,
         Scalar::new(0.0, 255.0, 0.0, 0.0),
@@ -281,8 +275,8 @@ fn process_frame(
             arduino.send(180, 180);
         }
 
-        let in_a_second = utils::computing::in_a_second(last_center_pt, center.clone(), dt);
-        let _ = utils::draw::draw_vector(frame_mat, center.clone(), in_a_second);
+        let in_a_second = utils::computing::in_a_second(last_center_pt, center, dt);
+        let _ = utils::draw::draw_vector(frame_mat, center, in_a_second);
     }
     *last_center = Some(center);
     Ok(())
