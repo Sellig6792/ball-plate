@@ -1,20 +1,19 @@
-use crate::utils::draw::upscale_mat;
 use crate::utils::Point;
+use crate::utils::draw::upscale_mat;
 use opencv::core::{Mat, MatTraitConst, MatTraitConstManual};
 use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use winit::application::ApplicationHandler;
-use winit::event::{WindowEvent, MouseButton, ElementState};
+use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
-// Enum to specify what action the background processing thread should execute
 #[derive(Debug, Clone)]
 pub enum TargetMessage {
-    AppendWaypoint(Point),  // Left click variant: schedules an additional point
-    InstantTarget(Point),   // Right click variant: instantly overrides the pathing
-    ResetToCenter,          // Middle click variant: purges everything and targets the center
+    AppendWaypoint(Point),
+    InstantTarget(Point),
+    ResetToCenter,
 }
 
 #[derive(Debug)]
@@ -63,6 +62,96 @@ impl App {
             }
         }
     }
+
+    /// Extracted helper to process cursor motion cleanly
+    fn handle_cursor_moved(&mut self, position: winit::dpi::PhysicalPosition<f64>) {
+        let upscale_factor: f32 = std::env::var("UPSCALE_FACTOR")
+            .expect("UPSCALE_FACTOR must be set in .env")
+            .parse()
+            .expect("UPSCALE_FACTOR must be a f32");
+
+        self.current_cursor = Point::new(
+            (position.x as f32 / upscale_factor) as i32,
+            (position.y as f32 / upscale_factor) as i32,
+        );
+
+        if self.is_mouse_down {
+            let _ = self
+                .click_tx
+                .send(TargetMessage::AppendWaypoint(self.current_cursor));
+        } else if self.is_right_mouse_down {
+            let _ = self
+                .click_tx
+                .send(TargetMessage::InstantTarget(self.current_cursor));
+        }
+    }
+
+    /// Extracted helper to process mouse clicks cleanly
+    fn handle_mouse_input(&mut self, state: ElementState, button: MouseButton) {
+        match button {
+            MouseButton::Left => {
+                if state == ElementState::Pressed {
+                    self.is_mouse_down = true;
+                    let _ = self
+                        .click_tx
+                        .send(TargetMessage::AppendWaypoint(self.current_cursor));
+                } else {
+                    self.is_mouse_down = false;
+                }
+            }
+            MouseButton::Right => {
+                if state == ElementState::Pressed {
+                    self.is_right_mouse_down = true;
+                    let _ = self
+                        .click_tx
+                        .send(TargetMessage::InstantTarget(self.current_cursor));
+                } else {
+                    self.is_right_mouse_down = false;
+                }
+            }
+            MouseButton::Middle => {
+                if state == ElementState::Pressed {
+                    let _ = self.click_tx.send(TargetMessage::ResetToCenter);
+                }
+            }
+            _ => {}
+        }
+    }
+
+    /// Extracted helper to process drawing steps cleanly
+    fn handle_redraw(&mut self) {
+        if let Some((window, surface)) = &mut self.window_graphics {
+            let mut buffer = surface.buffer_mut().unwrap();
+            buffer.fill(0);
+
+            if self.pixels.is_empty() {
+                let _ = buffer.present();
+                return;
+            }
+
+            let win_size = window.inner_size();
+            let win_w = win_size.width as usize;
+            let win_h = win_size.height as usize;
+
+            let draw_w = win_w.min(self.width as usize);
+            let draw_h = win_h.min(self.height as usize);
+            let img_w = self.width as usize;
+
+            for y in 0..draw_h {
+                let buffer_start = y * win_w;
+                let img_start = y * img_w;
+                let img_end = img_start + draw_w;
+
+                if img_end <= self.pixels.len() {
+                    let buffer_row = &mut buffer[buffer_start..buffer_start + draw_w];
+                    let img_row = &self.pixels[img_start..img_end];
+                    buffer_row.copy_from_slice(img_row);
+                }
+            }
+
+            let _ = buffer.present();
+        }
+    }
 }
 
 impl ApplicationHandler<UserEvent> for App {
@@ -103,48 +192,10 @@ impl ApplicationHandler<UserEvent> for App {
     ) {
         match event {
             WindowEvent::CursorMoved { position, .. } => {
-                let upscale_factor: f32 = std::env::var("UPSCALE_FACTOR")
-                    .expect("UPSCALE_FACTOR must be set in .env")
-                    .parse()
-                    .expect("UPSCALE_FACTOR must be a f32");
-
-                self.current_cursor = Point::new(
-                    (position.x as f32 / upscale_factor) as i32,
-                    (position.y as f32 / upscale_factor) as i32,
-                );
-
-                if self.is_mouse_down {
-                    let _ = self.click_tx.send(TargetMessage::AppendWaypoint(self.current_cursor.clone()));
-                } else if self.is_right_mouse_down {
-                    let _ = self.click_tx.send(TargetMessage::InstantTarget(self.current_cursor.clone()));
-                }
+                self.handle_cursor_moved(position);
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                match button {
-                    MouseButton::Left => {
-                        if state == ElementState::Pressed {
-                            self.is_mouse_down = true;
-                            let _ = self.click_tx.send(TargetMessage::AppendWaypoint(self.current_cursor.clone()));
-                        } else {
-                            self.is_mouse_down = false;
-                        }
-                    }
-                    MouseButton::Right => {
-                        if state == ElementState::Pressed {
-                            self.is_right_mouse_down = true;
-                            let _ = self.click_tx.send(TargetMessage::InstantTarget(self.current_cursor.clone()));
-                        } else {
-                            self.is_right_mouse_down = false;
-                        }
-                    }
-                    MouseButton::Middle => {
-                        if state == ElementState::Pressed {
-                            // Middle click triggers the reset action immediately
-                            let _ = self.click_tx.send(TargetMessage::ResetToCenter);
-                        }
-                    }
-                    _ => {}
-                }
+                self.handle_mouse_input(state, button);
             }
             WindowEvent::Resized(physical_size) => {
                 if physical_size.width > 0
@@ -157,37 +208,7 @@ impl ApplicationHandler<UserEvent> for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                if let Some((window, surface)) = &mut self.window_graphics {
-                    let mut buffer = surface.buffer_mut().unwrap();
-                    buffer.fill(0);
-
-                    if self.pixels.is_empty() {
-                        let _ = buffer.present();
-                        return;
-                    }
-
-                    let win_size = window.inner_size();
-                    let win_w = win_size.width as usize;
-                    let win_h = win_size.height as usize;
-
-                    let draw_w = win_w.min(self.width as usize);
-                    let draw_h = win_h.min(self.height as usize);
-                    let img_w = self.width as usize;
-
-                    for y in 0..draw_h {
-                        let buffer_start = y * win_w;
-                        let img_start = y * img_w;
-                        let img_end = img_start + draw_w;
-
-                        if img_end <= self.pixels.len() {
-                            let buffer_row = &mut buffer[buffer_start..buffer_start + draw_w];
-                            let img_row = &self.pixels[img_start..img_end];
-                            buffer_row.copy_from_slice(img_row);
-                        }
-                    }
-
-                    let _ = buffer.present();
-                }
+                self.handle_redraw();
             }
             WindowEvent::CloseRequested => event_loop.exit(),
             _ => {}

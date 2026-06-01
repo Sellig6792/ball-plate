@@ -1,7 +1,7 @@
 use crate::utils::Point;
 use dotenv::dotenv;
-use std::env;
-use std::collections::VecDeque; // Importation requise pour VecDeque
+use std::collections::VecDeque;
+use std::env; // Importation requise pour VecDeque
 
 #[derive(Debug, Clone, Copy)]
 pub enum Axe {
@@ -115,16 +115,20 @@ impl Pid {
     /// Consomme le point suivant en O(1) si la balle a atteint la cible actuelle
     pub fn update_trajectory_target(&mut self, current_ball: &Point) {
         if !self.target_queue.is_empty() {
-            let distance = (((current_ball.x - self.target.x).pow(2) + (current_ball.y - self.target.y).pow(2)) as f32).sqrt();
+            let distance = (((current_ball.x - self.target.x).pow(2)
+                + (current_ball.y - self.target.y).pow(2)) as f32)
+                .sqrt();
             // Si la balle s'approche à moins de 15 pixels de la cible, on passe à la suivante
-            let distance_threshold = std::env::var("TARGET_DISTANCE_THRESHOLD").unwrap_or("15".to_string()).parse::<f32>().unwrap();
-            if distance < distance_threshold {
-                if let Some(next_pt) = self.target_queue.pop_front() {
+            let distance_threshold = std::env::var("TARGET_DISTANCE_THRESHOLD")
+                .unwrap_or("15".to_string())
+                .parse::<f32>()
+                .unwrap();
+            if distance < distance_threshold && let Some(next_pt) = self.target_queue.pop_front() {
                     self.target = next_pt;
                 }
             }
         }
-    }
+
 
     pub fn calculate_inclination(&mut self, axe: Axe, ball_position_pixel: i32) -> f32 {
         let dt = self.config.dt;
