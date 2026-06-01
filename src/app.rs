@@ -9,6 +9,13 @@ use winit::event::{WindowEvent, MouseButton, ElementState};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
+// Enum to specify what action the background processing thread should execute
+#[derive(Debug, Clone)]
+pub enum TargetMessage {
+    AppendWaypoint(Point),  // Left click variant: schedules an additional point
+    InstantTarget(Point),   // Right click variant: instantly overrides the pathing
+}
+
 #[derive(Debug)]
 pub enum UserEvent {
     ChangeImage(Mat),
@@ -20,9 +27,10 @@ pub struct App {
     pub pixels: Vec<u32>,
     pub width: u32,
     pub height: u32,
-    pub click_tx: crossbeam_channel::Sender<Point>,
+    pub click_tx: crossbeam_channel::Sender<TargetMessage>,
     pub current_cursor: Point,
     pub is_mouse_down: bool,
+    pub is_right_mouse_down: bool, // Added to track right mouse button state
 }
 
 impl App {
@@ -96,21 +104,40 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let upscale_factor: f32 = std::env::var("UPSCALE_FACTOR")
                     .expect("UPSCALE_FACTOR must be set in .env")
-                    .parse().expect("UPSCALE_FACTOR must be a f32");
+                    .parse()
+                    .expect("UPSCALE_FACTOR must be a f32");
 
-                self.current_cursor = Point::new((position.x as f32 / upscale_factor) as i32, (position.y as f32 / upscale_factor) as i32);
+                self.current_cursor = Point::new(
+                    (position.x as f32 / upscale_factor) as i32,
+                    (position.y as f32 / upscale_factor) as i32,
+                );
+
                 if self.is_mouse_down {
-                    let _ = self.click_tx.send(self.current_cursor.clone());
+                    let _ = self.click_tx.send(TargetMessage::AppendWaypoint(self.current_cursor.clone()));
+                } else if self.is_right_mouse_down {
+                    // While dragging with right-click, continuously override the target location
+                    let _ = self.click_tx.send(TargetMessage::InstantTarget(self.current_cursor.clone()));
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if button == MouseButton::Left {
-                    if state == ElementState::Pressed {
-                        self.is_mouse_down = true;
-                        let _ = self.click_tx.send(self.current_cursor.clone());
-                    } else {
-                        self.is_mouse_down = false;
+                match button {
+                    MouseButton::Left => {
+                        if state == ElementState::Pressed {
+                            self.is_mouse_down = true;
+                            let _ = self.click_tx.send(TargetMessage::AppendWaypoint(self.current_cursor.clone()));
+                        } else {
+                            self.is_mouse_down = false;
+                        }
                     }
+                    MouseButton::Right => {
+                        if state == ElementState::Pressed {
+                            self.is_right_mouse_down = true;
+                            let _ = self.click_tx.send(TargetMessage::InstantTarget(self.current_cursor.clone()));
+                        } else {
+                            self.is_right_mouse_down = false;
+                        }
+                    }
+                    _ => {}
                 }
             }
             WindowEvent::Resized(physical_size) => {
