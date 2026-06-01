@@ -23,7 +23,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     dotenv::dotenv().ok();
 
     // 1. READ ENVIRONMENT CONFIGURATIONS FOR WINDOW RESOLUTION
-    // If not set in .env, defaults to standard 2x scaling configurations (1280x960)
     let window_res_vec = env::var("WINDOW_RESOLUTION")
         .expect("WINDOW_RESOLUTION must be set in .env")
         .split("x")
@@ -37,9 +36,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop: EventLoop<UserEvent> = EventLoop::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
 
+    // Create the crossbeam channel for sending user clicks to the processing loop
+    let (click_tx, click_rx) = crossbeam_channel::unbounded::<Point>();
+
     // 3. STARTING TOKIO IN A DEDICATED THREAD
     std::thread::spawn({
         let proxy = proxy.clone();
+        let click_rx = click_rx.clone();
 
         move || {
             let rt = tokio::runtime::Builder::new_multi_thread()
@@ -63,7 +66,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 });
 
                 tokio::task::spawn_blocking(move || {
-                    if let Err(e) = run_camera_capture(tx) {
+                    if let Err(e) = run_camera_capture(tx, click_rx) {
                         ceprintln!("Error", format!("while camera capture: {:?}", e));
                     }
                 })
@@ -73,19 +76,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
 
-    // 4. LAUNCHING THE GRAPHICAL APPLICATION (Using parsed variables)
+    // 4. LAUNCHING THE GRAPHICAL APPLICATION
     let mut app = App {
         window_graphics: None,
         pixels: Vec::new(),
         width: window_res_vec[0],
         height: window_res_vec[1],
+        click_tx,
+        current_cursor: Point::new(0, 0),
+        is_mouse_down: false,
     };
 
     event_loop.run_app(&mut app)?;
     Ok(())
 }
 
-fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::Error>> {
+fn run_camera_capture(
+    tx: mpsc::Sender<Mat>,
+    click_rx: crossbeam_channel::Receiver<Point>,
+) -> Result<(), Box<dyn std::error::Error>> {
     let mut camera = Camera::init()?;
 
     #[cfg(not(feature = "arduino-less"))]
@@ -128,10 +137,17 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     cprintln!("Log", "Capture and control loops started..." => Cyan);
 
     loop {
+        println!("{:?}", pid.target_queue.len());
+
         let start_loop = Instant::now();
         let dt = last_loop_time.elapsed().as_secs_f32();
         last_loop_time = start_loop;
         pid.config.dt = if dt > 0.0 { dt } else { 0.01 };
+
+        // Process all incoming clicks sent from the UI thread window handler
+        while let Ok(clicked_point) = click_rx.try_recv() {
+            pid.target_queue.push_back(clicked_point);
+        }
 
         if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(frame_mat.clone()) {
             cprintln!("Log", "The graphical receiver was closed. Stopping." => Cyan);
@@ -170,7 +186,6 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     Ok(())
 }
 
-/// Extracted helper to isolate the processing loop mechanics
 fn process_frame(
     frame_mat: &mut Mat,
     camera: &mut Camera,
@@ -182,6 +197,7 @@ fn process_frame(
     #[cfg(not(feature = "no-graph"))] current_feedback: (i16, i16),
     #[cfg(not(feature = "arduino-less"))] arduino: &mut usb::UsbController,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Draw steady fixed guidelines anchored at pid.center
     utils::draw::draw_plate_guidelines(frame_mat, pid);
 
     let ball = camera.get_circle(frame_mat)?;
@@ -194,13 +210,26 @@ fn process_frame(
     let (center, radius) = ball.unwrap();
     cprintln!("Ball", format!("X: {:4.} , Y: {:4.}", center.x, center.y) => Yellow);
 
+    // Evaluate if the ball has neared its destination and steps through the tracking stack
+    pid.update_trajectory_target(&center);
+
     let _ = utils::draw::draw_circle(
         frame_mat,
-        center,
+        center.clone(),
         radius,
         utils::draw::CircleType::Circle,
         Scalar::new(0.0, 255.0, 0.0, 0.0),
     );
+
+    // Highlight the active targeting destination center (pid.target)
+    for pt in pid.target_queue.iter() {
+        let _ = utils::draw::draw_circle(
+            frame_mat,
+            *pt,
+            1,
+            utils::draw::CircleType::Point,
+            Scalar::new(255.0, 50.0, 50.0, 0.0)        );
+    }
 
     let command_x = pid.calculate_inclination(Axe::X, center.x);
     let command_y = pid.calculate_inclination(Axe::Y, center.y);
@@ -219,10 +248,18 @@ fn process_frame(
     arduino.send(angle_x, angle_y);
 
     if let Some(last_center_pt) = *last_center {
-        let in_a_second = utils::computing::in_a_second(last_center_pt, center, dt);
-        let _ = utils::draw::draw_vector(frame_mat, center, in_a_second);
+        // Handle physical safety timeout when held by human hand
+        let distance_traveled = (((center.x - last_center_pt.x).pow(2)
+            + (center.y - last_center_pt.y).pow(2)) as f32)
+            .sqrt();
+        if (command_x.abs() > 0.2 || command_y.abs() > 0.2) && distance_traveled < 1.5 {
+            #[cfg(not(feature = "arduino-less"))]
+            arduino.send(180, 180);
+        }
+
+        let in_a_second = utils::computing::in_a_second(last_center_pt, center.clone(), dt);
+        let _ = utils::draw::draw_vector(frame_mat, center.clone(), in_a_second);
     }
     *last_center = Some(center);
-
     Ok(())
 }
