@@ -1,3 +1,4 @@
+use crate::utils::Point;
 use dotenv::dotenv;
 use std::env;
 
@@ -34,8 +35,9 @@ pub struct Pid {
     pub config: PidConfig,
     state_x: PidState,
     state_y: PidState,
-    pub center_x_pixel: f32,
-    pub center_y_pixel: f32,
+    plate_size_in_cm: f32,
+    pub original_center: Point,
+    pub center: Point,
     pixels_per_cm: f32,
 }
 
@@ -101,21 +103,22 @@ impl Pid {
                 invert_x,
                 invert_y,
             },
+            plate_size_in_cm: plate_physical_size_cm,
             state_x: PidState::new(),
             state_y: PidState::new(),
-            center_x_pixel: center_x_raw,
-            center_y_pixel: center_y_raw,
+            original_center: Point::new(center_x_raw, center_y_raw),
+            center: Point::new(center_x_raw, center_y_raw),
             pixels_per_cm,
         }
     }
 
     /// Calculates the required inclination setpoint to correct the ball's drift
-    pub fn calculate_inclination(&mut self, axe: Axe, ball_position_pixel: f32) -> f32 {
+    pub fn calculate_inclination(&mut self, axe: Axe, ball_position_pixel: i32) -> f32 {
         let dt = self.config.dt;
 
         let (state, center_pixel, invert) = match axe {
-            Axe::X => (&mut self.state_x, self.center_x_pixel, self.config.invert_x),
-            Axe::Y => (&mut self.state_y, self.center_y_pixel, self.config.invert_y),
+            Axe::X => (&mut self.state_x, self.center.x, self.config.invert_x),
+            Axe::Y => (&mut self.state_y, self.center.y, self.config.invert_y),
         };
 
         // Calculate spatial offset in centimeters
@@ -125,7 +128,8 @@ impl Pid {
             pixel_offset = -pixel_offset;
         }
 
-        let error_cm = (pixel_offset / self.pixels_per_cm).clamp(-20.0, 20.0);
+        let error_cm = (pixel_offset as f32 / self.pixels_per_cm)
+            .clamp(-self.plate_size_in_cm / 2.0, self.plate_size_in_cm / 2.0);
 
         // 1. Proportional Term (P)
         let p = self.config.kp * error_cm;
