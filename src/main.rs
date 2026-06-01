@@ -7,7 +7,7 @@ mod usb;
 mod utils;
 
 use crate::app::UserEvent::ChangeImage;
-use crate::app::{App, UserEvent};
+use crate::app::{App, UserEvent, TargetMessage};
 use crate::utils::Point;
 use camera::Camera;
 use cprint::{ceprintln, cprintln};
@@ -36,8 +36,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_loop: EventLoop<UserEvent> = EventLoop::with_user_event().build()?;
     let proxy = event_loop.create_proxy();
 
-    // Create the crossbeam channel for sending user clicks to the processing loop
-    let (click_tx, click_rx) = crossbeam_channel::unbounded::<Point>();
+    // Create the crossbeam channel using the customized message variant type
+    let (click_tx, click_rx) = crossbeam_channel::unbounded::<TargetMessage>();
 
     // 3. STARTING TOKIO IN A DEDICATED THREAD
     std::thread::spawn({
@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = tokio::task::spawn_blocking(move || {
                             let _ = proxy_task.send_event(ChangeImage(frame));
                         })
-                        .await;
+                            .await;
                     }
                 });
 
@@ -70,8 +70,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ceprintln!("Error", format!("while camera capture: {:?}", e));
                     }
                 })
-                .await
-                .unwrap();
+                    .await
+                    .unwrap();
             });
         }
     });
@@ -85,6 +85,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         click_tx,
         current_cursor: Point::new(0, 0),
         is_mouse_down: false,
+        is_right_mouse_down: false, // Initialized here
     };
 
     event_loop.run_app(&mut app)?;
@@ -93,7 +94,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
 fn run_camera_capture(
     tx: mpsc::Sender<Mat>,
-    click_rx: crossbeam_channel::Receiver<Point>,
+    click_rx: crossbeam_channel::Receiver<TargetMessage>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut camera = Camera::init()?;
 
@@ -144,9 +145,18 @@ fn run_camera_capture(
         last_loop_time = start_loop;
         pid.config.dt = if dt > 0.0 { dt } else { 0.01 };
 
-        // Process all incoming clicks sent from the UI thread window handler
-        while let Ok(clicked_point) = click_rx.try_recv() {
-            pid.target_queue.push_back(clicked_point);
+        // Process matching incoming mouse actions
+        while let Ok(message) = click_rx.try_recv() {
+            match message {
+                TargetMessage::AppendWaypoint(clicked_point) => {
+                    pid.target_queue.push_back(clicked_point);
+                }
+                TargetMessage::InstantTarget(clicked_point) => {
+                    // Right-click behavior: purge tracking history and snap targeting onto destination
+                    pid.target_queue.clear();
+                    pid.target = clicked_point;
+                }
+            }
         }
 
         if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(frame_mat.clone()) {
@@ -221,15 +231,25 @@ fn process_frame(
         Scalar::new(0.0, 255.0, 0.0, 0.0),
     );
 
-    // Highlight the active targeting destination center (pid.target)
+    // Render scheduled pathing points in steel Blue
     for pt in pid.target_queue.iter() {
         let _ = utils::draw::draw_circle(
             frame_mat,
             *pt,
             1,
             utils::draw::CircleType::Point,
-            Scalar::new(255.0, 50.0, 50.0, 0.0)        );
+            Scalar::new(255.0, 50.0, 50.0, 0.0),
+        );
     }
+
+    // Highlight the next target
+    let _ = utils::draw::draw_circle(
+        frame_mat,
+        pid.target.clone(),
+        4,
+        utils::draw::CircleType::Point,
+        Scalar::new(255.0, 50.0, 50.0, 0.0),
+    );
 
     let command_x = pid.calculate_inclination(Axe::X, center.x);
     let command_y = pid.calculate_inclination(Axe::Y, center.y);
