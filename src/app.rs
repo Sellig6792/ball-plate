@@ -14,6 +14,7 @@ use winit::window::Window;
 pub enum TargetMessage {
     AppendWaypoint(Point),  // Left click variant: schedules an additional point
     InstantTarget(Point),   // Right click variant: instantly overrides the pathing
+    ResetToCenter,          // Middle click variant: purges everything and targets the center
 }
 
 #[derive(Debug)]
@@ -30,7 +31,7 @@ pub struct App {
     pub click_tx: crossbeam_channel::Sender<TargetMessage>,
     pub current_cursor: Point,
     pub is_mouse_down: bool,
-    pub is_right_mouse_down: bool, // Added to track right mouse button state
+    pub is_right_mouse_down: bool,
 }
 
 impl App {
@@ -115,7 +116,6 @@ impl ApplicationHandler<UserEvent> for App {
                 if self.is_mouse_down {
                     let _ = self.click_tx.send(TargetMessage::AppendWaypoint(self.current_cursor.clone()));
                 } else if self.is_right_mouse_down {
-                    // While dragging with right-click, continuously override the target location
                     let _ = self.click_tx.send(TargetMessage::InstantTarget(self.current_cursor.clone()));
                 }
             }
@@ -135,6 +135,12 @@ impl ApplicationHandler<UserEvent> for App {
                             let _ = self.click_tx.send(TargetMessage::InstantTarget(self.current_cursor.clone()));
                         } else {
                             self.is_right_mouse_down = false;
+                        }
+                    }
+                    MouseButton::Middle => {
+                        if state == ElementState::Pressed {
+                            // Middle click triggers the reset action immediately
+                            let _ = self.click_tx.send(TargetMessage::ResetToCenter);
                         }
                     }
                     _ => {}
