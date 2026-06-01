@@ -1,6 +1,7 @@
 use crate::utils::Point;
 use dotenv::dotenv;
 use std::env;
+use std::collections::VecDeque; // Importation requise pour VecDeque
 
 #[derive(Debug, Clone, Copy)]
 pub enum Axe {
@@ -36,17 +37,16 @@ pub struct Pid {
     state_x: PidState,
     state_y: PidState,
     plate_size_in_cm: f32,
-    pub original_center: Point,
     pub center: Point,
+    pub target: Point,
+    pub target_queue: VecDeque<Point>, // Utilisation propre de la file d'attente
     pixels_per_cm: f32,
 }
 
 impl Pid {
-    /// Constructs the PID controller from global and manual environment variables
     pub fn from_env() -> Self {
         dotenv().ok();
 
-        // Strict retrieval of PID parameters from the .env file
         let kp: f32 = env::var("PID_KP")
             .expect("The environment variable 'PID_KP' is missing.")
             .parse()
@@ -86,7 +86,6 @@ impl Pid {
             .parse()
             .unwrap();
 
-        // Actual physical dimensions of the game plate (40x40 cm)
         let plate_physical_size_cm: f32 = env::var("PLATE_PHYSICAL_SIZE_CM")
             .expect("The environment variable 'PLATE_PHYSICAL_SIZE_CM' is missing.")
             .parse()
@@ -106,22 +105,35 @@ impl Pid {
             plate_size_in_cm: plate_physical_size_cm,
             state_x: PidState::new(),
             state_y: PidState::new(),
-            original_center: Point::new(center_x_raw, center_y_raw),
             center: Point::new(center_x_raw, center_y_raw),
+            target: Point::new(center_x_raw, center_y_raw),
+            target_queue: VecDeque::new(),
             pixels_per_cm,
         }
     }
 
-    /// Calculates the required inclination setpoint to correct the ball's drift
+    /// Consomme le point suivant en O(1) si la balle a atteint la cible actuelle
+    pub fn update_trajectory_target(&mut self, current_ball: &Point) {
+        if !self.target_queue.is_empty() {
+            let distance = (((current_ball.x - self.target.x).pow(2) + (current_ball.y - self.target.y).pow(2)) as f32).sqrt();
+            // Si la balle s'approche à moins de 15 pixels de la cible, on passe à la suivante
+            let distance_threshold = std::env::var("TARGET_DISTANCE_THRESHOLD").unwrap_or("15".to_string()).parse::<f32>().unwrap();
+            if distance < distance_threshold {
+                if let Some(next_pt) = self.target_queue.pop_front() {
+                    self.target = next_pt;
+                }
+            }
+        }
+    }
+
     pub fn calculate_inclination(&mut self, axe: Axe, ball_position_pixel: i32) -> f32 {
         let dt = self.config.dt;
 
         let (state, center_pixel, invert) = match axe {
-            Axe::X => (&mut self.state_x, self.center.x, self.config.invert_x),
-            Axe::Y => (&mut self.state_y, self.center.y, self.config.invert_y),
+            Axe::X => (&mut self.state_x, self.target.x, self.config.invert_x),
+            Axe::Y => (&mut self.state_y, self.target.y, self.config.invert_y),
         };
 
-        // Calculate spatial offset in centimeters
         let mut pixel_offset = center_pixel - ball_position_pixel;
 
         if invert {
@@ -131,31 +143,25 @@ impl Pid {
         let error_cm = (pixel_offset as f32 / self.pixels_per_cm)
             .clamp(-self.plate_size_in_cm / 2.0, self.plate_size_in_cm / 2.0);
 
-        // 1. Proportional Term (P)
         let p = self.config.kp * error_cm;
 
-        // 2. Integral Term (I) with anti-windup clamping
         if self.config.ki > 0.0 {
             state.integral_sum += error_cm * dt;
             state.integral_sum = state.integral_sum.clamp(-5.0, 5.0);
         }
         let i = self.config.ki * state.integral_sum;
 
-        // 3. Derivative Term (D) based on the movement speed of the ball
         let d = if dt > 0.0 {
             self.config.kd * ((error_cm - state.error_previous) / dt)
         } else {
             0.0
         };
 
-        // Save current error for the next cycle
         state.error_previous = error_cm;
 
-        // Normalize the block output to a ratio centered around 0.5 (flat plate)
         let pid_output = (p + i + d) / 60.0;
         let plate_inclination = 0.5 + pid_output;
 
-        // Physical limitation to protect the mechanical travel of your servomotors
         plate_inclination.clamp(0., 1.)
     }
 
@@ -183,17 +189,11 @@ impl Pid {
         }
 
         let height = (rod - arm) + (2.0 * arm * h);
-
-        // let argument = (height.powi(2) - arm.powi(2) + rod.powi(2)) / (2.0 * rod * height);
         let argument = (height.powi(2) + arm.powi(2) - rod.powi(2)) / (2.0 * arm * height);
         let argument_clamped = argument.clamp(-1.0, 1.0);
 
-        // let theta_base_rad = argument_clamped.asin();
         let theta_base_rad = argument_clamped.acos();
         let theta_base_degrees = theta_base_rad.to_degrees();
-
-        // Transformation for the 90 -> 270 range
-        // let theta_degrees: u16 = (theta_base_degrees + 180.0).round() as u16;
         let theta_degrees: u16 = (270. - theta_base_degrees).round() as u16;
 
         Ok(theta_degrees)

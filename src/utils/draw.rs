@@ -87,7 +87,7 @@ pub fn upscale_mat(src: &mut Mat) -> Result<(), Error> {
 pub fn draw_plate_guidelines(frame_mat: &mut Mat, pid: &Pid) {
     let _ = draw_circle(
         frame_mat,
-        pid.original_center,
+        pid.center,
         2,
         CircleType::Point,
         Scalar::new(197.0, 73.0, 137.0, 0.0),

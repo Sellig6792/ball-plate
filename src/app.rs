@@ -1,17 +1,17 @@
 use crate::utils::draw::upscale_mat;
+use crate::utils::Point;
 use opencv::core::{Mat, MatTraitConst, MatTraitConstManual};
 use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::rc::Rc;
 use winit::application::ApplicationHandler;
-use winit::event::WindowEvent;
+use winit::event::{WindowEvent, MouseButton, ElementState};
 use winit::event_loop::ActiveEventLoop;
 use winit::window::Window;
 
-// Custom event to notify the application that a new image needs to be displayed
 #[derive(Debug)]
 pub enum UserEvent {
-    ChangeImage(Mat), // Contains the new image data
+    ChangeImage(Mat),
 }
 
 type RcWin = Rc<Window>;
@@ -20,6 +20,9 @@ pub struct App {
     pub pixels: Vec<u32>,
     pub width: u32,
     pub height: u32,
+    pub click_tx: crossbeam_channel::Sender<Point>,
+    pub current_cursor: Point,
+    pub is_mouse_down: bool,
 }
 
 impl App {
@@ -30,28 +33,22 @@ impl App {
         let width = size.width as u32;
         let height = size.height as u32;
 
-        // 1. Retrieve raw data as an u8 slice (very fast)
         if let Ok(data) = frame.data_bytes() {
-            // 2. Pre-allocate the vector to prevent dynamic reallocations
             let total_pixels = (width * height) as usize;
             let mut new_pixels = Vec::with_capacity(total_pixels);
 
-            // 3. OpenCV stores in BGR format (3 bytes per pixel). Steps by 3.
             for chunk in data.chunks_exact(3) {
                 let b = chunk[0] as u32;
                 let g = chunk[1] as u32;
                 let r = chunk[2] as u32;
 
-                // Soft buffer format: 0x00RRGGBB
                 new_pixels.push((r << 16) | (g << 8) | b);
             }
 
-            // 4. Update state
             self.pixels = new_pixels;
             self.width = width;
             self.height = height;
 
-            // 5. Request a redrawing
             if let Some((window, _)) = &self.window_graphics {
                 window.request_redraw();
             }
@@ -62,12 +59,10 @@ impl App {
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window_graphics.is_none() {
-            // 2. Use LogicalSize to properly scale on WSLg / Windows displays
             let size = winit::dpi::LogicalSize::new(self.width as f64, self.height as f64);
 
             let attrs = Window::default_attributes()
                 .with_inner_size(size)
-                // Optional: you can disable resizing to avoid issues
                 .with_resizable(false)
                 .with_title("Ball Tracking Visualisation");
 
@@ -75,7 +70,6 @@ impl ApplicationHandler<UserEvent> for App {
             let context = Context::new(window.clone()).unwrap();
             let mut surface = Surface::new(&context, window.clone()).unwrap();
 
-            // 3. Initialize the drawing surface using the same safe dimensions
             let width = NonZeroU32::new(self.width).unwrap();
             let height = NonZeroU32::new(self.height).unwrap();
             surface.resize(width, height).unwrap();
@@ -84,7 +78,6 @@ impl ApplicationHandler<UserEvent> for App {
         }
     }
 
-    // Capture our custom event in real-time
     fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: UserEvent) {
         match event {
             UserEvent::ChangeImage(mut frame) => {
@@ -100,6 +93,26 @@ impl ApplicationHandler<UserEvent> for App {
         event: WindowEvent,
     ) {
         match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                let upscale_factor: f32 = std::env::var("UPSCALE_FACTOR")
+                    .expect("UPSCALE_FACTOR must be set in .env")
+                    .parse().expect("UPSCALE_FACTOR must be a f32");
+
+                self.current_cursor = Point::new((position.x as f32 / upscale_factor) as i32, (position.y as f32 / upscale_factor) as i32);
+                if self.is_mouse_down {
+                    let _ = self.click_tx.send(self.current_cursor.clone());
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Left {
+                    if state == ElementState::Pressed {
+                        self.is_mouse_down = true;
+                        let _ = self.click_tx.send(self.current_cursor.clone());
+                    } else {
+                        self.is_mouse_down = false;
+                    }
+                }
+            }
             WindowEvent::Resized(physical_size) => {
                 if physical_size.width > 0
                     && physical_size.height > 0
@@ -113,32 +126,26 @@ impl ApplicationHandler<UserEvent> for App {
             WindowEvent::RedrawRequested => {
                 if let Some((window, surface)) = &mut self.window_graphics {
                     let mut buffer = surface.buffer_mut().unwrap();
-
-                    // 1. Always clear the buffer to avoid artifacts
                     buffer.fill(0);
 
-                    // 2. SAFETY CHECK: Ensure image_pixels is not empty
                     if self.pixels.is_empty() {
                         let _ = buffer.present();
-                        return; // Exit early if there's nothing to draw
+                        return;
                     }
 
                     let win_size = window.inner_size();
                     let win_w = win_size.width as usize;
                     let win_h = win_size.height as usize;
 
-                    // 3. Calculate bounds safely
                     let draw_w = win_w.min(self.width as usize);
                     let draw_h = win_h.min(self.height as usize);
                     let img_w = self.width as usize;
 
-                    // 4. Row-by-row copy with boundary protection
                     for y in 0..draw_h {
                         let buffer_start = y * win_w;
                         let img_start = y * img_w;
-
-                        // Ensure we don't slice past the end of the image_pixels vector
                         let img_end = img_start + draw_w;
+
                         if img_end <= self.pixels.len() {
                             let buffer_row = &mut buffer[buffer_start..buffer_start + draw_w];
                             let img_row = &self.pixels[img_start..img_end];
@@ -149,7 +156,6 @@ impl ApplicationHandler<UserEvent> for App {
                     let _ = buffer.present();
                 }
             }
-
             WindowEvent::CloseRequested => event_loop.exit(),
             _ => {}
         }
