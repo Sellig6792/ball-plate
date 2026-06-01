@@ -90,8 +90,8 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
 
     #[cfg(not(feature = "arduino-less"))]
     let mut arduino = usb::UsbController::new(
-        &std::env::var("USB_PORT").expect("USB_PORT must be set"),
-        std::env::var("USB_BAUD_RATE")
+        &env::var("USB_PORT").expect("USB_PORT must be set"),
+        env::var("USB_BAUD_RATE")
             .expect("USB_BAUD_RATE must be set")
             .parse()?,
     )?;
@@ -102,8 +102,12 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
     // --- ENVIRONMENT CONFIGURATIONS FOR TELEMETRY PLOT ---
     #[cfg(not(feature = "no-graph"))]
     let mut telemetry_plot = {
-        let width: i32 = std::env::var("GRAPH_WIDTH").unwrap_or_else(|_| "250".to_string()).parse()?;
-        let height: i32 = std::env::var("GRAPH_HEIGHT").unwrap_or_else(|_| "125".to_string()).parse()?;
+        let width: i32 = env::var("GRAPH_WIDTH")
+            .unwrap_or_else(|_| "250".to_string())
+            .parse()?;
+        let height: i32 = env::var("GRAPH_HEIGHT")
+            .unwrap_or_else(|_| "125".to_string())
+            .parse()?;
         utils::graph::TelemetryGraph::new(120, width, height)
     };
     // -----------------------------------------------------
@@ -151,10 +155,14 @@ fn run_camera_capture(tx: mpsc::Sender<Mat>) -> Result<(), Box<dyn std::error::E
             &mut pid,
             &mut last_center,
             dt,
-            #[cfg(not(feature = "no-graph"))] &mut telemetry_plot,
-            #[cfg(not(feature = "no-graph"))] &mut current_target,
-            #[cfg(not(feature = "no-graph"))] current_feedback,
-            #[cfg(not(feature = "arduino-less"))] &mut arduino,
+            #[cfg(not(feature = "no-graph"))]
+            &mut telemetry_plot,
+            #[cfg(not(feature = "no-graph"))]
+            &mut current_target,
+            #[cfg(not(feature = "no-graph"))]
+            current_feedback,
+            #[cfg(not(feature = "arduino-less"))]
+            &mut arduino,
         )?;
     }
 
@@ -186,10 +194,16 @@ fn process_frame(
     let (center, radius) = ball.unwrap();
     cprintln!("Ball", format!("X: {:4.} , Y: {:4.}", center.x, center.y) => Yellow);
 
-    let _ = utils::draw::draw_circle(frame_mat, &center, radius, utils::draw::CircleType::Circle, Scalar::new(0.0, 255.0, 0.0, 0.0));
+    let _ = utils::draw::draw_circle(
+        frame_mat,
+        center,
+        radius,
+        utils::draw::CircleType::Circle,
+        Scalar::new(0.0, 255.0, 0.0, 0.0),
+    );
 
-    let command_x = pid.calculate_inclination(Axe::X, center.x as f32);
-    let command_y = pid.calculate_inclination(Axe::Y, center.y as f32);
+    let command_x = pid.calculate_inclination(Axe::X, center.x);
+    let command_y = pid.calculate_inclination(Axe::Y, center.y);
     cprintln!("PID", format!("X: {:.2} ; Y: {:.2} ==> dt: {:.2}", command_x, command_y, dt) => Magenta);
 
     let angle_x = Pid::angle_from_height(command_x)?;
@@ -205,8 +219,8 @@ fn process_frame(
     arduino.send(angle_x, angle_y);
 
     if let Some(last_center_pt) = *last_center {
-        let in_a_second = utils::computing::in_a_second(last_center_pt, center.clone(), dt);
-        let _ = utils::draw::draw_vector(frame_mat, center.clone(), in_a_second);
+        let in_a_second = utils::computing::in_a_second(last_center_pt, center, dt);
+        let _ = utils::draw::draw_vector(frame_mat, center, in_a_second);
     }
     *last_center = Some(center);
 

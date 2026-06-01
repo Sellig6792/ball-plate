@@ -30,7 +30,7 @@ impl App {
         let width = size.width as u32;
         let height = size.height as u32;
 
-        // 1. Retrieve raw data as a u8 slice (very fast)
+        // 1. Retrieve raw data as an u8 slice (very fast)
         if let Ok(data) = frame.data_bytes() {
             // 2. Pre-allocate the vector to prevent dynamic reallocations
             let total_pixels = (width * height) as usize;
@@ -42,7 +42,7 @@ impl App {
                 let g = chunk[1] as u32;
                 let r = chunk[2] as u32;
 
-                // Softbuffer format: 0x00RRGGBB
+                // Soft buffer format: 0x00RRGGBB
                 new_pixels.push((r << 16) | (g << 8) | b);
             }
 
@@ -51,7 +51,7 @@ impl App {
             self.width = width;
             self.height = height;
 
-            // 5. Request a redraw
+            // 5. Request a redrawing
             if let Some((window, _)) = &self.window_graphics {
                 window.request_redraw();
             }

@@ -20,7 +20,7 @@ impl UsbController {
             Ok(p) => {
                 cprintln!("Log", format!("Connected to Arduino on {}", port_name) => Cyan);
                 // Essential delay to let the Arduino complete its auto-reset
-                std::thread::sleep(std::time::Duration::from_secs(2));
+                std::thread::sleep(Duration::from_secs(2));
                 Ok(Self { port: p })
             }
 

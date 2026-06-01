@@ -44,7 +44,7 @@ impl Camera {
         Ok(Self { camera })
     }
 
-    /// Retrieve raw image from camera and decode it to OpenCV BGR Matrix
+    /// Retrieve a raw image from the camera and decode it to OpenCV BGR Matrix
     pub fn get_frame(&mut self) -> Result<Mat, NokhwaError> {
         let frame_buffer = &self.camera.frame()?;
         Ok(imdecode(
