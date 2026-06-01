@@ -7,7 +7,7 @@ mod usb;
 mod utils;
 
 use crate::app::UserEvent::ChangeImage;
-use crate::app::{App, UserEvent, TargetMessage};
+use crate::app::{App, TargetMessage, UserEvent};
 use crate::utils::Point;
 use camera::Camera;
 use cprint::{ceprintln, cprintln};
@@ -61,7 +61,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         let _ = tokio::task::spawn_blocking(move || {
                             let _ = proxy_task.send_event(ChangeImage(frame));
                         })
-                            .await;
+                        .await;
                     }
                 });
 
@@ -70,8 +70,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ceprintln!("Error", format!("while camera capture: {:?}", e));
                     }
                 })
-                    .await
-                    .unwrap();
+                .await
+                .unwrap();
             });
         }
     });
@@ -85,7 +85,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         click_tx,
         current_cursor: Point::new(0, 0),
         is_mouse_down: false,
-        is_right_mouse_down: false, // Initialized here
+        is_right_mouse_down: false,
     };
 
     event_loop.run_app(&mut app)?;
@@ -150,11 +150,18 @@ fn run_camera_capture(
             match message {
                 TargetMessage::AppendWaypoint(clicked_point) => {
                     pid.target_queue.push_back(clicked_point);
+                    if pid.center == pid.target {
+                        pid.target = pid.target_queue.pop_front().unwrap().clone();
+                    }
                 }
                 TargetMessage::InstantTarget(clicked_point) => {
-                    // Right-click behavior: purge tracking history and snap targeting onto destination
                     pid.target_queue.clear();
                     pid.target = clicked_point;
+                }
+                TargetMessage::ResetToCenter => {
+                    // Reset behavior: clean queue and reset targets directly back onto the safe plate center
+                    pid.target_queue.clear();
+                    pid.target = pid.center.clone();
                 }
             }
         }
@@ -207,8 +214,27 @@ fn process_frame(
     #[cfg(not(feature = "no-graph"))] current_feedback: (i16, i16),
     #[cfg(not(feature = "arduino-less"))] arduino: &mut usb::UsbController,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    // Draw steady fixed guidelines anchored at pid.center
     utils::draw::draw_plate_guidelines(frame_mat, pid);
+
+    for pt in pid.target_queue.iter() {
+        let _ = utils::draw::draw_circle(
+            frame_mat,
+            *pt,
+            1,
+            utils::draw::CircleType::Point,
+            Scalar::new(255.0, 50.0, 50.0, 0.0),
+        );
+    }
+
+    if pid.center != pid.target {
+        let _ = utils::draw::draw_circle(
+            frame_mat,
+            pid.target.clone(),
+            4,
+            utils::draw::CircleType::Point,
+            Scalar::new(255.0, 50.0, 50.0, 0.0),
+        );
+    }
 
     let ball = camera.get_circle(frame_mat)?;
     if ball.is_none() {
@@ -220,7 +246,6 @@ fn process_frame(
     let (center, radius) = ball.unwrap();
     cprintln!("Ball", format!("X: {:4.} , Y: {:4.}", center.x, center.y) => Yellow);
 
-    // Evaluate if the ball has neared its destination and steps through the tracking stack
     pid.update_trajectory_target(&center);
 
     let _ = utils::draw::draw_circle(
@@ -229,26 +254,6 @@ fn process_frame(
         radius,
         utils::draw::CircleType::Circle,
         Scalar::new(0.0, 255.0, 0.0, 0.0),
-    );
-
-    // Render scheduled pathing points in steel Blue
-    for pt in pid.target_queue.iter() {
-        let _ = utils::draw::draw_circle(
-            frame_mat,
-            *pt,
-            1,
-            utils::draw::CircleType::Point,
-            Scalar::new(255.0, 50.0, 50.0, 0.0),
-        );
-    }
-
-    // Highlight the next target
-    let _ = utils::draw::draw_circle(
-        frame_mat,
-        pid.target.clone(),
-        4,
-        utils::draw::CircleType::Point,
-        Scalar::new(255.0, 50.0, 50.0, 0.0),
     );
 
     let command_x = pid.calculate_inclination(Axe::X, center.x);
@@ -268,7 +273,6 @@ fn process_frame(
     arduino.send(angle_x, angle_y);
 
     if let Some(last_center_pt) = *last_center {
-        // Handle physical safety timeout when held by human hand
         let distance_traveled = (((center.x - last_center_pt.x).pow(2)
             + (center.y - last_center_pt.y).pow(2)) as f32)
             .sqrt();
