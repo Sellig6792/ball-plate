@@ -267,14 +267,6 @@ fn process_frame(
     arduino.send(angle_x, angle_y);
 
     if let Some(last_center_pt) = *last_center {
-        let distance_traveled = (((center.x - last_center_pt.x).pow(2)
-            + (center.y - last_center_pt.y).pow(2)) as f32)
-            .sqrt();
-        if (command_x.abs() > 0.2 || command_y.abs() > 0.2) && distance_traveled < 1.5 {
-            #[cfg(not(feature = "arduino-less"))]
-            arduino.send(180, 180);
-        }
-
         let in_a_second = utils::computing::in_a_second(last_center_pt, center, dt);
         let _ = utils::draw::draw_vector(frame_mat, center, in_a_second);
     }
