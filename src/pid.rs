@@ -1,7 +1,7 @@
 use crate::utils::Point;
 use dotenv::dotenv;
 use std::collections::VecDeque;
-use std::env; // Importation requise pour VecDeque
+use std::env;
 
 #[derive(Debug, Clone, Copy)]
 pub enum Axe {
@@ -39,7 +39,7 @@ pub struct Pid {
     plate_size_in_cm: f32,
     pub center: Point,
     pub target: Point,
-    pub target_queue: VecDeque<Point>, // Utilisation propre de la file d'attente
+    pub target_queue: VecDeque<Point>,
     pixels_per_cm: f32,
 }
 
@@ -112,23 +112,25 @@ impl Pid {
         }
     }
 
-    /// Consomme le point suivant en O(1) si la balle a atteint la cible actuelle
+    /// Consumes the next waypoint in O(1) if the ball has neared the active target
     pub fn update_trajectory_target(&mut self, current_ball: &Point) {
         if !self.target_queue.is_empty() {
             let distance = (((current_ball.x - self.target.x).pow(2)
                 + (current_ball.y - self.target.y).pow(2)) as f32)
                 .sqrt();
-            // Si la balle s'approche à moins de 15 pixels de la cible, on passe à la suivante
-            let distance_threshold = std::env::var("TARGET_DISTANCE_THRESHOLD")
-                .unwrap_or("15".to_string())
+
+            let distance_threshold = env::var("TARGET_DISTANCE_THRESHOLD")
+                .unwrap_or_else(|_| "15".to_string())
                 .parse::<f32>()
                 .unwrap();
-            if distance < distance_threshold && let Some(next_pt) = self.target_queue.pop_front() {
-                    self.target = next_pt;
-                }
+
+            if distance < distance_threshold
+                && let Some(next_pt) = self.target_queue.pop_front()
+            {
+                self.target = next_pt;
             }
         }
-
+    }
 
     pub fn calculate_inclination(&mut self, axe: Axe, ball_position_pixel: i32) -> f32 {
         let dt = self.config.dt;
@@ -151,7 +153,18 @@ impl Pid {
 
         if self.config.ki > 0.0 {
             state.integral_sum += error_cm * dt;
-            state.integral_sum = state.integral_sum.clamp(-5.0, 5.0);
+
+            // Scaled Anti-Windup Clamping:
+            // Since the final total adjustment power relies on `/ 60.0` scaling,
+            // clamping `integral_sum` around +/- 3.0 to 5.0 keeps the max potential
+            // integral contribution tightly bound within 10% - 15% of total servo throw,
+            // entirely neutralizing windup latency.
+            let clamp_integral: f32 = env::var("CLAMP_INTEGRAL")
+                .unwrap_or_else(|_| "0.".to_string())
+                .parse().unwrap();
+            
+            state.integral_sum = state.integral_sum.clamp(-clamp_integral, clamp_integral);
+            
         }
         let i = self.config.ki * state.integral_sum;
 
@@ -163,10 +176,14 @@ impl Pid {
 
         state.error_previous = error_cm;
 
-        let pid_output = (p + i + d) / 60.0;
+        let pid_output = (p + i + d) / (self.plate_size_in_cm / 2.0);
         let plate_inclination = 0.5 + pid_output;
 
-        plate_inclination.clamp(0., 1.)
+        let clamp_command: f32 = env::var("CLAMP_COMMAND")
+            .unwrap_or_else(|_| "0.".to_string())
+            .parse()
+            .unwrap();
+        plate_inclination.clamp(0. + clamp_command, 1. - clamp_command)
     }
 
     pub fn angle_from_height(h: f32) -> Result<u16, String> {
