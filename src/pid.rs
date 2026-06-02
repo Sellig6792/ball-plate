@@ -132,7 +132,22 @@ impl Pid {
         }
     }
 
-    pub fn calculate_inclination(&mut self, axe: Axe, ball_position_pixel: i32) -> f32 {
+    pub fn calculate_inclination(&mut self, mut axe: Axe, ball_position_pixel: i32) -> f32 {
+        let invert_x_with_y: bool = env::var("INVERT_X_WITH_Y")
+            .unwrap_or_else(|_| "false".to_string())
+            .parse()
+            .unwrap();
+
+        if invert_x_with_y {
+            match axe {
+                Axe::X => {
+                    axe = Axe::Y;
+                }
+                Axe::Y => {
+                    axe = Axe::X;
+                }
+            }
+        }
         let dt = self.config.dt;
 
         let (state, center_pixel, invert) = match axe {
@@ -161,10 +176,10 @@ impl Pid {
             // entirely neutralizing windup latency.
             let clamp_integral: f32 = env::var("CLAMP_INTEGRAL")
                 .unwrap_or_else(|_| "0.".to_string())
-                .parse().unwrap();
-            
+                .parse()
+                .unwrap();
+
             state.integral_sum = state.integral_sum.clamp(-clamp_integral, clamp_integral);
-            
         }
         let i = self.config.ki * state.integral_sum;
 
