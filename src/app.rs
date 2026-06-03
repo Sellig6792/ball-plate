@@ -1,6 +1,6 @@
-use crate::utils::Point;
 use crate::utils::draw::upscale_mat;
 use opencv::core::{Mat, MatTraitConst, MatTraitConstManual};
+use pid::Point;
 use softbuffer::{Context, Surface};
 use std::num::NonZeroU32;
 use std::rc::Rc;

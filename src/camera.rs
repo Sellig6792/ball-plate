@@ -1,4 +1,4 @@
-use crate::utils::{Point, ball};
+use crate::utils::ball;
 use nokhwa::NokhwaError;
 use nokhwa::pixel_format::LumaFormat;
 use nokhwa::utils::{
@@ -10,6 +10,7 @@ use opencv::imgproc::{
     CHAIN_APPROX_SIMPLE, COLOR_BGR2HSV, RETR_EXTERNAL, cvt_color, find_contours, gaussian_blur,
     min_enclosing_circle,
 };
+use pid::Point;
 use std::env;
 
 pub struct Camera {

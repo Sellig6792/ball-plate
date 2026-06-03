@@ -1,9 +1,9 @@
-use crate::pid::Pid;
 use crate::utils::Point;
 use opencv::Error;
 use opencv::core::{Mat, Scalar};
 use opencv::core::{MatTraitConst, Point as CvPoint, Size};
 use opencv::imgproc;
+use pid::Pid;
 use std::env;
 
 pub enum CircleType {

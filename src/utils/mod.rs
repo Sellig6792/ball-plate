@@ -4,6 +4,5 @@ pub mod draw;
 
 #[cfg(not(feature = "no-graph"))]
 pub mod graph;
-mod point;
 
-pub use point::Point;
+use pid::Point;

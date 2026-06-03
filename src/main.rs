@@ -1,6 +1,5 @@
 mod app;
 mod camera;
-mod pid;
 
 #[cfg(not(feature = "arduino-less"))]
 mod usb;
@@ -8,19 +7,18 @@ mod utils;
 
 use crate::app::UserEvent::ChangeImage;
 use crate::app::{App, TargetMessage, UserEvent};
-use crate::utils::Point;
 use camera::Camera;
 use cprint::{ceprintln, cprintln};
 use opencv::core::MatTraitConst;
 use opencv::core::{Mat, Scalar};
-use pid::{Axe, Pid};
+use pid::{Axe, Pid, Point};
 use std::env;
 use std::time::Instant;
 use tokio::sync::mpsc;
 use winit::event_loop::{EventLoop, EventLoopProxy};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    dotenv::dotenv().ok();
+    dotenvy::dotenv().ok();
 
     let window_res_vec = env::var("WINDOW_RESOLUTION")
         .expect("WINDOW_RESOLUTION must be set in .env")

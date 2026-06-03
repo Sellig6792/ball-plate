@@ -1,5 +1,6 @@
-use crate::utils::Point;
-use dotenv::dotenv;
+mod point;
+
+pub use point::Point;
 use std::collections::VecDeque;
 use std::env;
 
@@ -36,17 +37,15 @@ pub struct Pid {
     pub config: PidConfig,
     state_x: PidState,
     state_y: PidState,
-    plate_size_in_cm: f32,
+    pub plate_size_in_cm: f32,
     pub center: Point,
     pub target: Point,
     pub target_queue: VecDeque<Point>,
-    pixels_per_cm: f32,
+    pub pixels_per_cm: f32,
 }
 
 impl Pid {
     pub fn from_env() -> Self {
-        dotenv().ok();
-
         let kp: f32 = env::var("PID_KP")
             .expect("The environment variable 'PID_KP' is missing.")
             .parse()
@@ -233,5 +232,39 @@ impl Pid {
         let theta_degrees: u16 = (270. - theta_base_degrees).round() as u16;
 
         Ok(theta_degrees)
+    }
+}
+
+impl Default for PidConfig {
+    fn default() -> Self {
+        Self {
+            kp: 0.8,
+            ki: 0.1,
+            kd: 0.35,
+            dt: 1.0 / 10.0,
+            invert_x: false,
+            invert_y: false,
+        }
+    }
+}
+
+impl Default for Pid {
+    fn default() -> Self {
+        let center_x_raw = 320;
+        let center_y_raw = 240;
+        let plate_physical_size_cm = 40.0;
+        let plate_size_pixel = 640.0;
+        let pixels_per_cm = plate_size_pixel / plate_physical_size_cm;
+
+        Self {
+            config: PidConfig::default(),
+            plate_size_in_cm: plate_physical_size_cm,
+            state_x: PidState::new(),
+            state_y: PidState::new(),
+            center: Point::new(center_x_raw, center_y_raw),
+            target: Point::new(center_x_raw, center_y_raw),
+            target_queue: VecDeque::new(),
+            pixels_per_cm,
+        }
     }
 }
