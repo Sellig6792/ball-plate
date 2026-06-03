@@ -23,20 +23,15 @@ no-graph = []
 
 [workspace]
 resolver = "3"
-members = ["physics","pid"]
+members = ["physics","pid", "pid_parameters_optimizer"]
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
 rand = "0.10.1"
-plotters = "0.3.7"
 physics = { path = "physics"}
 
 [[bench]]
 name = "pid_benchmarks"
-harness = false
-
-[[bench]]
-name = "pid_optimizer"
 harness = false
 
 [[bench]]
