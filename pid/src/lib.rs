@@ -238,9 +238,9 @@ impl Pid {
 impl Default for PidConfig {
     fn default() -> Self {
         Self {
-            kp: 0.8,
-            ki: 0.1,
-            kd: 0.35,
+            kp: 9.5,
+            ki: 0.001,
+            kd: 1.18,
             dt: 1.0 / 10.0,
             invert_x: false,
             invert_y: false,
@@ -268,3 +268,4 @@ impl Default for Pid {
         }
     }
 }
+

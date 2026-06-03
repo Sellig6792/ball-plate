@@ -2,3 +2,5 @@
 /_canny_frames*
 .idea/
 pid/Cargo.lock
+physics/Cargo.lock
+pid**.png
