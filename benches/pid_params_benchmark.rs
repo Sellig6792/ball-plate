@@ -27,23 +27,35 @@ pub struct ScenarioResult {
     pub failure_reason: &'static str,
 }
 
-/// Simulates a 2D multi-axis physical scenario using the centralized workspace engine and your Pid struct.
-fn execute_scenario(kp: f32, ki: f32, kd: f32, scenario: PhysicalScenario, pixels_per_cm: f32) -> ScenarioResult {
+/// Simulates a 2D multi-axis physical scenario using sub-stepping to guarantee physical stability at low frequencies.
+fn execute_scenario(
+    kp: f32,
+    ki: f32,
+    kd: f32,
+    scenario: PhysicalScenario,
+    pixels_per_cm: f32,
+) -> ScenarioResult {
     // Instantiate the 2D physics tracker using the shared workspace library
-    let mut physics = Physics::new(scenario.start_pixel_x, scenario.start_pixel_y, pixels_per_cm);
+    let mut physics = Physics::new(
+        scenario.start_pixel_x,
+        scenario.start_pixel_y,
+        pixels_per_cm,
+    );
 
     // Initialize your official Pid struct
-    let mut pid = Pid::default();
-    pid.config.kp = kp;
-    pid.config.ki = ki;
-    pid.config.kd = kd;
+    let mut mut_pid = Pid::default();
+    mut_pid.config.kp = kp;
+    mut_pid.config.ki = ki;
+    mut_pid.config.kd = kd;
 
     // Explicitly align with your known physical axis configuration
-    pid.config.invert_x = false;
-    pid.config.invert_y = false;
+    mut_pid.config.invert_x = false;
+    mut_pid.config.invert_y = false;
 
-    let dt = pid.config.dt;
-    let plate_half_bound_cm = pid.plate_size_in_cm / 2.0; // Dynamically grab configuration limits
+    // Forçage du pas de temps global à 0.10s (10 Hz) pour s'aligner sur l'optimizer
+    mut_pid.config.dt = 0.10;
+    let dt = mut_pid.config.dt;
+    let plate_half_bound_cm = mut_pid.plate_size_in_cm / 2.0;
 
     let precision_threshold_cm = 0.12;
     let velocity_threshold_cms = 0.40;
@@ -52,22 +64,27 @@ fn execute_scenario(kp: f32, ki: f32, kd: f32, scenario: PhysicalScenario, pixel
 
     let max_frames = 350;
 
+    // Configuration du sub-stepping (4 sous-pas par frame pour stabiliser l'intégration d'Euler)
+    let sub_steps = 4;
+    let sub_dt = dt / (sub_steps as f32);
+
     for frame in 1..=max_frames {
-        // Retrieve positions transformed to camera pixels for the PID controller
+        // Le PID prend sa décision à la fréquence nominale (10 Hz) basé sur la position courante
         let current_pixel_x = physics.get_pixel_pos_x();
         let current_pixel_y = physics.get_pixel_pos_y();
 
-        // Calculate normalized servo commands [0.0 - 1.0] from PID tracking loop
-        let incl_x = pid.calculate_inclination(Axe::X, current_pixel_x);
-        let incl_y = pid.calculate_inclination(Axe::Y, current_pixel_y);
+        let incl_x = mut_pid.calculate_inclination(Axe::X, current_pixel_x);
+        let incl_y = mut_pid.calculate_inclination(Axe::Y, current_pixel_y);
 
-        // Advance physical world state by directly supplying raw kinematics commands to handle crosstalk
-        physics.step(incl_x, incl_y, dt);
+        // --- BOUCLE DE SUB-STEPPING PHYISQUE ---
+        // On répète l'intégration physique avec un pas très fin pour éviter la divergence mathématique
+        for _ in 0..sub_steps {
+            physics.step(incl_x, incl_y, sub_dt);
+        }
 
         // --- STRICT BOUNDARY GUARDRAIL ---
-        // Calculate the physical distance from the center of the plate
-        let center_x_cm = (pid.target.x as f32) / pixels_per_cm;
-        let center_y_cm = (pid.target.y as f32) / pixels_per_cm;
+        let center_x_cm = (mut_pid.target.x as f32) / pixels_per_cm;
+        let center_y_cm = (mut_pid.target.y as f32) / pixels_per_cm;
 
         let distance_x_cm = (physics.pos_x_cm - center_x_cm).abs();
         let distance_y_cm = (physics.pos_y_cm - center_y_cm).abs();
@@ -84,9 +101,11 @@ fn execute_scenario(kp: f32, ki: f32, kd: f32, scenario: PhysicalScenario, pixel
             };
         }
 
-        // Stability Check: Evaluated relative to the absolute setpoint delta
-        let stable_x = distance_x_cm < precision_threshold_cm && physics.vel_x.abs() < velocity_threshold_cms;
-        let stable_y = distance_y_cm < precision_threshold_cm && physics.vel_y.abs() < velocity_threshold_cms;
+        // Stability Check
+        let stable_x =
+            distance_x_cm < precision_threshold_cm && physics.vel_x.abs() < velocity_threshold_cms;
+        let stable_y =
+            distance_y_cm < precision_threshold_cm && physics.vel_y.abs() < velocity_threshold_cms;
 
         if stable_x && stable_y {
             consecutive_stable_frames += 1;
@@ -119,27 +138,31 @@ fn execute_scenario(kp: f32, ki: f32, kd: f32, scenario: PhysicalScenario, pixel
 fn main() {
     let args: Vec<String> = env::args().collect();
 
-    // Re-tuned to use your expanded sweet spot bounds discovered during optimization sweeps
-    let default_kp = 9.500;
-    let default_ki = 0.001;
-    let default_kd = 0.510;
+    // Valeurs par défaut (Sweet spot historique ou dernières valeurs de l'optimizer)
+    let default_kp = 1.100;
+    let default_ki = 0.001; // Correction du Ki à une valeur stable pour éviter le windup immédiat
+    let default_kd = 0.167;
 
-    if args.len() < 4 {
-        println!("[NOTICE] Missing arguments. Usage: cargo bench -- <Kp> <Ki> <Kd>");
-        println!("Executing structural imperfection fallback benchmark suite...\n");
-        execute_benchmark(default_kp, default_ki, default_kd, 100);
-        return;
+    let mut kp = default_kp;
+    let mut ki = default_ki;
+    let mut kd = default_kd;
+
+    // Correction de la logique de parsing pour intercepter correctement les arguments de cargo bench
+    if args.len() >= 4 {
+        kp = args[1].parse().unwrap_or(default_kp);
+        ki = args[2].parse().unwrap_or(default_ki);
+        kd = args[3].parse().unwrap_or(default_kd);
+    } else {
+        println!("[NOTICE] Missing or incomplete arguments. Usage: cargo bench -- <Kp> <Ki> <Kd>");
+        println!("Executing with default fallback parameters...\n");
     }
-
-    let kp: f32 = args[1].parse().unwrap_or(default_kp);
-    let ki: f32 = args[2].parse().unwrap_or(default_ki);
-    let kd: f32 = args[3].parse().unwrap_or(default_kd);
 
     execute_benchmark(kp, ki, kd, 100);
 }
 
 fn execute_benchmark(kp: f32, ki: f32, kd: f32, count: usize) {
     let mut default_pid = Pid::default();
+    default_pid.config.dt = 0.10; // Aligné à 100ms
     let dt = default_pid.config.dt;
     let pixels_per_cm = default_pid.pixels_per_cm;
 
@@ -150,7 +173,10 @@ fn execute_benchmark(kp: f32, ki: f32, kd: f32, count: usize) {
     println!("   -> Proportional Gain (Kp):   {:.4}", kp);
     println!("   -> Integral Gain (Ki):       {:.4}", ki);
     println!("   -> Derivative Gain (Kd):     {:.4}", kd);
-    println!("   -> Processing Step (dt):     {:.4} seconds", dt);
+    println!(
+        "   -> Processing Step (dt):     {:.4} seconds (with 4x sub-stepping)",
+        dt
+    );
     println!("   -> Total 2D Stress Scenarios: {}", count);
     println!("-------------------------------------------------------------------------");
 
@@ -159,7 +185,6 @@ fn execute_benchmark(kp: f32, ki: f32, kd: f32, count: usize) {
         let progression = i as f32 / (count - 1) as f32;
         let direction = if i % 2 == 0 { 1.0 } else { -1.0 };
 
-        // Generate start locations inside the physical square perimeter (40cm square -> max 20cm)
         let start_x_cm = direction * (0.5 + progression * 17.5);
         let start_y_cm = -direction * (0.5 + progression * 17.5);
 
@@ -190,7 +215,10 @@ fn execute_benchmark(kp: f32, ki: f32, kd: f32, count: usize) {
     let mut drop_fails = 0;
     let mut timeout_fails = 0;
 
-    println!("{:<6} | {:<42} | {:<10} | {:<12}", "ID", "Scenario Profile Type Description", "Status", "Settled Time");
+    println!(
+        "{:<6} | {:<42} | {:<10} | {:<12}",
+        "ID", "Scenario Profile Type Description", "Status", "Settled Time"
+    );
     println!("-------------------------------------------------------------------------");
 
     for scenario in &scenarios {
@@ -199,8 +227,12 @@ fn execute_benchmark(kp: f32, ki: f32, kd: f32, count: usize) {
         let status_str = if result.success {
             success_count += 1;
             total_stabilization_time += result.stabilization_time_ms;
-            if result.stabilization_time_ms > max_stabilization_time { max_stabilization_time = result.stabilization_time_ms; }
-            if result.stabilization_time_ms < min_stabilization_time { min_stabilization_time = result.stabilization_time_ms; }
+            if result.stabilization_time_ms > max_stabilization_time {
+                max_stabilization_time = result.stabilization_time_ms;
+            }
+            if result.stabilization_time_ms < min_stabilization_time {
+                min_stabilization_time = result.stabilization_time_ms;
+            }
             "SUCCESS"
         } else {
             if result.failure_reason == "BALL_DROPPED_OFF_PLATE" {
@@ -222,7 +254,11 @@ fn execute_benchmark(kp: f32, ki: f32, kd: f32, count: usize) {
             println!(
                 "{:<6} | {:<42} | {:<10} | {:<12}",
                 scenario.id,
-                if scenario.id <= 15 || scenario.id == count { scenario.description } else { "[Mid-Range Scenario Run]" },
+                if scenario.id <= 15 || scenario.id == count {
+                    scenario.description
+                } else {
+                    "[Mid-Range Scenario Run]"
+                },
                 status_str,
                 time_str
             );
@@ -237,17 +273,34 @@ fn execute_benchmark(kp: f32, ki: f32, kd: f32, count: usize) {
     println!("-------------------------------------------------------------------------");
     println!(" PERFORMANCE OVERVIEW & COMPILATION RESULTS SUMMARY                      ");
     println!("-------------------------------------------------------------------------");
-    println!(" CPU Processing Execution Clock Speed : {:?}", benchmark_duration);
-    println!(" Global Robustness Success Rate       : {:.2}% ({}/{} Scenarios Stabilized)", success_rate, success_count, count);
+    println!(
+        " CPU Processing Execution Clock Speed : {:?}",
+        benchmark_duration
+    );
+    println!(
+        " Global Robustness Success Rate       : {:.2}% ({}/{} Scenarios Stabilized)",
+        success_rate, success_count, count
+    );
     println!(" Boundary Crashes (Dropped Balls)     : {}", drop_fails);
     println!(" Continuous Over-Oscillation Timeouts : {}", timeout_fails);
 
     if success_count > 0 {
-        println!(" Average Successful Settling Time     : {:.2} ms", total_stabilization_time / success_count as f32);
-        println!(" Peak Optimal Response Time           : {:.2} ms", min_stabilization_time);
-        println!(" Worst-Case Recovery Settle Time      : {:.2} ms", max_stabilization_time);
+        println!(
+            " Average Successful Settling Time     : {:.2} ms",
+            total_stabilization_time / success_count as f32
+        );
+        println!(
+            " Peak Optimal Response Time           : {:.2} ms",
+            min_stabilization_time
+        );
+        println!(
+            " Worst-Case Recovery Settle Time      : {:.2} ms",
+            max_stabilization_time
+        );
     } else {
-        println!(" Average Successful Settling Time     : N/A (Zero scenarios survived tuning window)");
+        println!(
+            " Average Successful Settling Time     : N/A (Zero scenarios survived tuning window)"
+        );
     }
     println!("=========================================================================");
 }

@@ -40,8 +40,16 @@ fn test_neutral_equilibrium_physics_and_pid() {
     let error_x = (physics.get_pixel_pos_x() - 320).abs();
     let error_y = (physics.get_pixel_pos_y() - 240).abs();
 
-    assert!(error_x <= 3, "Ball settled too far from center X: gap was {} px", error_x);
-    assert!(error_y <= 3, "Ball settled too far from center Y: gap was {} px", error_y);
+    assert!(
+        error_x <= 3,
+        "Ball settled too far from center X: gap was {} px",
+        error_x
+    );
+    assert!(
+        error_y <= 3,
+        "Ball settled too far from center Y: gap was {} px",
+        error_y
+    );
 }
 
 #[test]

@@ -7,4 +7,8 @@ edition = "2024"
 plotters = "0.3.7"
 physics = { path = "../physics" }
 pid = { path = "../pid"}
-rayon = "1.10"
+rayon = "1.12.0"
+wgpu = "22.1.0"
+bytemuck = { version = "1.16", features = ["derive"] }
+pollster = "0.3"
+dotenvy = "0.15.7"

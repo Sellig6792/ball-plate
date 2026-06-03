@@ -16,7 +16,13 @@ struct EvaluationResult {
     success_count: usize,
 }
 
-fn simulate_single_situation(kp: f32, ki: f32, kd: f32, dt: f32, situation: Situation) -> Option<f32> {
+fn simulate_single_situation(
+    kp: f32,
+    ki: f32,
+    kd: f32,
+    dt: f32,
+    situation: Situation,
+) -> Option<f32> {
     let mut pid = Pid::default();
     pid.config.kp = kp;
     pid.config.ki = ki;
@@ -61,7 +67,9 @@ fn simulate_single_situation(kp: f32, ki: f32, kd: f32, dt: f32, situation: Situ
             return None;
         }
 
-        if distance_from_center_cm < precision_threshold_cm && physics.vel_x.abs() < velocity_threshold_cms {
+        if distance_from_center_cm < precision_threshold_cm
+            && physics.vel_x.abs() < velocity_threshold_cms
+        {
             consecutive_stable_frames += 1;
             if consecutive_stable_frames >= required_stable_frames {
                 let stable_frame = frame - required_stable_frames;
@@ -87,7 +95,10 @@ fn evaluate_pid_performance(
     for (idx, &situation) in situations.iter().enumerate() {
         // Early pruning for totally unstable configurations
         if idx == 50 && success_count < 5 {
-            return EvaluationResult { avg_success_time_ms: 8000.0, success_count };
+            return EvaluationResult {
+                avg_success_time_ms: 8000.0,
+                success_count,
+            };
         }
 
         if let Some(time) = simulate_single_situation(kp, ki, kd, dt, situation) {
@@ -102,13 +113,19 @@ fn evaluate_pid_performance(
         8000.0
     };
 
-    EvaluationResult { avg_success_time_ms, success_count }
+    EvaluationResult {
+        avg_success_time_ms,
+        success_count,
+    }
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dt = 0.033;
 
-    let mut situations = [Situation { start_pos: 0.0, start_vel: 0.0 }; 100];
+    let mut situations = [Situation {
+        start_pos: 0.0,
+        start_vel: 0.0,
+    }; 100];
     for i in 0..100 {
         let progression = i as f32 / 99.0;
         let direction = if i % 2 == 0 { 1.0 } else { -1.0 };
@@ -121,14 +138,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let x_resolution = 60;
     let y_resolution = 50;
 
-    let kp_min = 0.0; let kp_max = 5.0;
-    let kd_min = 0.0; let kd_max = 10.0;
+    let kp_min = 0.0;
+    let kp_max = 5.0;
+    let kd_min = 0.0;
+    let kd_max = 10.0;
 
     let ki_slices = [0.0, 0.5, 1.0];
     let total_x_cells = x_resolution * ki_slices.len();
     let total_tasks = y_resolution * x_resolution * ki_slices.len();
 
-    println!("Running multi-threaded optimization sweep across {} combinations...", total_tasks);
+    println!(
+        "Running multi-threaded optimization sweep across {} combinations...",
+        total_tasks
+    );
 
     // Atomic counter to track completed tasks across multiple CPU cores
     let completed_counter = AtomicUsize::new(0);
@@ -161,10 +183,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let percent = (current * 100) / total_tasks;
 
             // Log progress cleanly at every 10% milestone
-            if percent % 10 == 0 && percent > last_reported_percentage.load(Ordering::Relaxed) {
-                if last_reported_percentage.compare_exchange(percent - 10, percent, Ordering::Relaxed, Ordering::Relaxed).is_ok() {
-                    println!("[Progress] {}% complete...", percent);
-                }
+            if percent.is_multiple_of(10)
+                && percent > last_reported_percentage.load(Ordering::Relaxed)
+                && last_reported_percentage
+                    .compare_exchange(percent - 10, percent, Ordering::Relaxed, Ordering::Relaxed)
+                    .is_ok()
+            {
+                println!("[Progress] {}% complete...", percent);
             }
 
             (y_idx, x_res_idx, ki_idx, res)
@@ -184,7 +209,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let ki = ki_slices[ki_idx];
         let x_idx = x_res_idx * ki_slices.len() + ki_idx;
 
-        if res.success_count >= minimum_acceptable_successes && res.avg_success_time_ms < best_avg_time {
+        if res.success_count >= minimum_acceptable_successes
+            && res.avg_success_time_ms < best_avg_time
+        {
             best_avg_time = res.avg_success_time_ms;
         }
 
@@ -201,20 +228,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     root.fill(&WHITE)?;
 
     let mut chart = ChartBuilder::on(&root)
-        .caption("Continuous PID Sweeper Performance Grid (Parallelized)", ("sans-serif", 24).into_font())
+        .caption(
+            "Continuous PID Sweeper Performance Grid (Parallelized)",
+            ("sans-serif", 24).into_font(),
+        )
         .margin(30)
         .x_label_area_size(70)
         .y_label_area_size(70)
         .build_cartesian_2d(0..total_x_cells, 0..y_resolution)?;
 
-    chart.configure_mesh()
+    chart
+        .configure_mesh()
         .x_desc("Derivative Gain (Kd Range 0-10) / Sliced Integral Gain (Ki)")
         .y_desc("Proportional Gain (Kp Range 0-5)")
         .x_label_formatter(&|&x| {
             let x_res_idx = x / ki_slices.len();
             let ki_idx = x % ki_slices.len();
             if x_res_idx < x_resolution && x_res_idx % 10 == 0 && ki_idx == 0 {
-                let current_kd = kd_min + (kd_max - kd_min) * (x_res_idx as f32 / x_resolution as f32);
+                let current_kd =
+                    kd_min + (kd_max - kd_min) * (x_res_idx as f32 / x_resolution as f32);
                 format!("{:.1} / Ki:{:.1}", current_kd, ki_slices[ki_idx])
             } else {
                 "".to_string()
@@ -244,9 +276,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(res) = &results_grid[y_idx][x_idx] {
                     let color = if res.success_count == 0 {
                         RED.mix(0.85)
-                    } else if (res.avg_success_time_ms - best_avg_time).abs() < 0.01 && best_avg_time < 8000.0 && res.success_count >= minimum_acceptable_successes {
-                        println!("=> OPTIMAL NODE FOUND: Kp: {:.3} | Ki: {:.3} | Kd: {:.3} -> Success Avg: {:.1} ms ({}/100)",
-                                 kp, ki, kd, res.avg_success_time_ms, res.success_count);
+                    } else if (res.avg_success_time_ms - best_avg_time).abs() < 0.01
+                        && best_avg_time < 8000.0
+                        && res.success_count >= minimum_acceptable_successes
+                    {
+                        println!(
+                            "=> OPTIMAL NODE FOUND: Kp: {:.3} | Ki: {:.3} | Kd: {:.3} -> Success Avg: {:.1} ms ({}/100)",
+                            kp, ki, kd, res.avg_success_time_ms, res.success_count
+                        );
                         BLUE.mix(1.0)
                     } else if res.avg_success_time_ms < 1200.0 {
                         GREEN.mix(0.9)
@@ -270,8 +307,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n[SUCCESS] Heatmap optimization output rendered at 'pid_continuous_heatmap.png'.");
 
     if let Some((kp, ki, kd)) = perfect_winner {
-        println!("🥇 UNSTOPPABLE PERFECT WINNER (100/100): Kp: {:.3} | Ki: {:.3} | Kd: {:.3} -> Flawless Avg Time: {:.1} ms",
-                 kp, ki, kd, fastest_perfect_time);
+        println!(
+            "🥇 UNSTOPPABLE PERFECT WINNER (100/100): Kp: {:.3} | Ki: {:.3} | Kd: {:.3} -> Flawless Avg Time: {:.1} ms",
+            kp, ki, kd, fastest_perfect_time
+        );
     }
 
     Ok(())

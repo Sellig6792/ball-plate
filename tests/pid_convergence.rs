@@ -1,8 +1,8 @@
-use std::thread::sleep;
-use std::time::Duration;
-use rand::distr::{Distribution, Uniform};
 use physics::Physics;
 use pid::{Axe, Pid, Point};
+use rand::distr::{Distribution, Uniform};
+use std::thread::sleep;
+use std::time::Duration;
 
 #[test]
 fn test_physics_driven_waypoint_stepping() {
@@ -49,8 +49,6 @@ fn test_physics_driven_waypoint_stepping() {
         "The physical rolling path of the ball failed to advance the target queue to Waypoint 2"
     );
 }
-
-
 
 #[test]
 fn test_ball_converges_and_settles() {
@@ -111,7 +109,9 @@ fn test_ball_converges_and_settles() {
         assert!(
             distance_x_cm <= half_length_cm && distance_y_cm <= half_length_cm,
             "Test failed: The ball rolled off the plate! X distance: {:.2}cm, Y distance: {:.2}cm (Limit: {:.2}cm)",
-            distance_x_cm, distance_y_cm, half_length_cm
+            distance_x_cm,
+            distance_y_cm,
+            half_length_cm
         );
 
         let ball_x = physics.get_pixel_pos_x();
@@ -137,7 +137,10 @@ fn test_ball_converges_and_settles() {
         physics.step(cmd_x, cmd_y, pid.config.dt);
     }
 
-    assert!(converged, "Ball failed to reach and settle on the center within the 60-second limit.");
+    assert!(
+        converged,
+        "Ball failed to reach and settle on the center within the 60-second limit."
+    );
 }
 
 #[test]
@@ -203,7 +206,9 @@ fn test_ball_converges_with_velocity() {
         assert!(
             distance_x_cm <= half_length_cm && distance_y_cm <= half_length_cm,
             "Test failed: The ball rolled off the plate! X distance: {:.2}cm, Y distance: {:.2}cm (Limit: {:.2}cm)",
-            distance_x_cm, distance_y_cm, half_length_cm
+            distance_x_cm,
+            distance_y_cm,
+            half_length_cm
         );
 
         let ball_x = physics.get_pixel_pos_x();
@@ -218,7 +223,10 @@ fn test_ball_converges_with_velocity() {
 
             // Clear frame and dump grid matrix to stdout
             print!("\x1B[2J\x1B[1;1H");
-            println!("Frame: {}/{} | Position: ({}, {})", frame, max_frames, ball_x, ball_y);
+            println!(
+                "Frame: {}/{} | Position: ({}, {})",
+                frame, max_frames, ball_x, ball_y
+            );
             println!("{}+", "-".repeat(grid_width as usize));
 
             for r in 0..grid_height {
@@ -257,5 +265,8 @@ fn test_ball_converges_with_velocity() {
         physics.step(cmd_x, cmd_y, pid.config.dt);
     }
 
-    assert!(converged, "Ball failed to reach and settle on the center within 60 seconds.");
+    assert!(
+        converged,
+        "Ball failed to reach and settle on the center within 60 seconds."
+    );
 }

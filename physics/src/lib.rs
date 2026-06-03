@@ -88,18 +88,21 @@ impl Physics {
 
         // --- X-AXIS SERVO kinematics ---
         let height_x = (self.rod - self.arm) + (2.0 * self.arm * cmd_h_x);
-        let argument_x = (height_x.powi(2) + self.arm.powi(2) - self.rod.powi(2)) / (2.0 * self.arm * height_x);
+        let argument_x =
+            (height_x.powi(2) + self.arm.powi(2) - self.rod.powi(2)) / (2.0 * self.arm * height_x);
         let target_theta_x = 270.0 - argument_x.clamp(-1.0, 1.0).acos().to_degrees();
         let diff_x = target_theta_x - self.current_servo_degrees_x;
-        self.current_servo_degrees_x += diff_x.clamp(-max_degrees_this_frame, max_degrees_this_frame);
+        self.current_servo_degrees_x +=
+            diff_x.clamp(-max_degrees_this_frame, max_degrees_this_frame);
 
         // --- Y-AXIS SERVO kinematics ---
         let height_y = (self.rod - self.arm) + (2.0 * self.arm * cmd_h_y);
-        let argument_y = (height_y.powi(2) + self.arm.powi(2) - self.rod.powi(2)) / (2.0 * self.arm * height_y);
+        let argument_y =
+            (height_y.powi(2) + self.arm.powi(2) - self.rod.powi(2)) / (2.0 * self.arm * height_y);
         let target_theta_y = 270.0 - argument_y.clamp(-1.0, 1.0).acos().to_degrees();
         let diff_y = target_theta_y - self.current_servo_degrees_y;
-        self.current_servo_degrees_y += diff_y.clamp(-max_degrees_this_frame, max_degrees_this_frame);
-
+        self.current_servo_degrees_y +=
+            diff_y.clamp(-max_degrees_this_frame, max_degrees_this_frame);
 
         // ==========================================
         // 2. COMPUTE PURE PHYSICAL PLATE TILTS
@@ -110,14 +113,14 @@ impl Physics {
         let tilt_dev_rad_y = (self.current_servo_degrees_y - 180.0).to_radians();
         let pure_plate_tilt_rad_y = tilt_dev_rad_y.sin() * max_plate_tilt_rad;
 
-
         // ==========================================
         // 3. APPLY STRUCTURAL CROSS-COUPLING
         // ==========================================
         // The effective tilt driving acceleration on each axis is now composite
-        let effective_tilt_x = pure_plate_tilt_rad_x + (pure_plate_tilt_rad_y * self.crosstalk_y_into_x);
-        let effective_tilt_y = pure_plate_tilt_rad_y + (pure_plate_tilt_rad_x * self.crosstalk_x_into_y);
-
+        let effective_tilt_x =
+            pure_plate_tilt_rad_x + (pure_plate_tilt_rad_y * self.crosstalk_y_into_x);
+        let effective_tilt_y =
+            pure_plate_tilt_rad_y + (pure_plate_tilt_rad_x * self.crosstalk_x_into_y);
 
         // ==========================================
         // 4. CALCULATE DYNAMICS AND STEP POSITIONS
