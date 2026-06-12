@@ -23,7 +23,7 @@ no-graph = []
 
 [workspace]
 resolver = "3"
-members = ["physics","pid", "pid_parameters_optimizer"]
+members = ["physics","pid"]
 
 [dev-dependencies]
 criterion = { version = "0.8.2", features = ["html_reports"] }
