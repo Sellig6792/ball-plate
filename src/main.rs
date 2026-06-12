@@ -1,14 +1,6 @@
-mod app;
-mod camera;
-
-#[cfg(not(feature = "arduino-less"))]
-mod usb;
-mod utils;
-
-use crate::app::UserEvent::ChangeImage;
-use crate::app::{App, TargetMessage, UserEvent};
-use camera::Camera;
 use cprint::{ceprintln, cprintln};
+use hh_ball_plate::app::{App, TargetMessage, UserEvent, UserEvent::ChangeImage};
+use hh_ball_plate::{camera::Camera, usb, utils};
 use opencv::core::MatTraitConst;
 use opencv::core::{Mat, Scalar};
 use pid::{Axe, Pid, Point};
