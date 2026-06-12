@@ -15,6 +15,7 @@ serialport = "4.9.0"
 cprint = { version = "1.0.0", features = ["cprint", "ceprint"]}
 crossbeam-channel = "0.5.15"
 pid = { path = "pid"}
+ctrlc = "3.5.2"
 
 
 [features]
