@@ -45,14 +45,22 @@ impl Camera {
         Ok(Self { camera })
     }
 
-    /// Retrieve a raw image from the camera and decode it to OpenCV BGR Matrix
+    /// Retrieve a raw image from the camera and decode it safely.
+    /// Returns an empty Mat if the frame buffer was corrupted mid-flight.
     pub fn get_frame(&mut self) -> Result<Mat, NokhwaError> {
         let frame_buffer = &self.camera.frame()?;
-        Ok(imdecode(
-            &Mat::from_slice(frame_buffer.buffer()).expect("Unable to read image buffer"),
-            IMREAD_COLOR,
-        )
-        .expect("Failed to decode MJPEG stream"))
+
+        let slice_mat = match Mat::from_slice(frame_buffer.buffer()) {
+            Ok(mat) => mat,
+            Err(_) => return Ok(Mat::default()), // Drop corrupt raw data
+        };
+
+        // Instead of panicking on .expect(), gracefully fallback to an empty Mat
+        // so the main loop can skip the corrupted frame via frame_mat.empty()
+        match imdecode(&slice_mat, IMREAD_COLOR) {
+            Ok(decoded_matrix) if !decoded_matrix.empty() => Ok(decoded_matrix),
+            _ => Ok(Mat::default()),
+        }
     }
 
     /// Isolate the ball color (typically fluorescent orange) in HSV color space
@@ -92,16 +100,18 @@ impl Camera {
         Ok(blurred)
     }
 
-    /// Analyze contours to calculate, the center (X,Y) and radius of the ball
+    /// Analyze contours to calculate the center (X,Y) and radius of the ball
     pub fn get_circle(
         &self,
         image_bgr: &Mat,
     ) -> Result<Option<(Point, i32)>, Box<dyn std::error::Error>> {
-        let mask = Self::threshold(image_bgr)?;
-        let clean_mask = Self::blur(&mask)?;
         if image_bgr.empty() {
             return Ok(None);
         }
+
+        let mask = Self::threshold(image_bgr)?;
+        let clean_mask = Self::blur(&mask)?;
+
         let mut contours = Vector::<Vector<opencv::core::Point>>::new();
         find_contours(
             &clean_mask,
@@ -110,9 +120,6 @@ impl Camera {
             CHAIN_APPROX_SIMPLE,
             opencv::core::Point::new(0, 0),
         )?;
-        if clean_mask.empty() {
-            return Ok(None);
-        }
 
         let mut max_area = 0.0;
         let mut best_contour = None;

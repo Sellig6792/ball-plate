@@ -128,11 +128,6 @@ fn run_camera_capture(
         // Extracted local logic to process target inputs clearly
         handle_incoming_messages(&click_rx, &mut pid);
 
-        if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(frame_mat.clone()) {
-            cprintln!("Log", "The graphical receiver was closed. Stopping." => Cyan);
-            break;
-        }
-
         frame_mat = camera.get_frame()?;
         if frame_mat.empty() {
             continue;
@@ -158,8 +153,12 @@ fn run_camera_capture(
             #[cfg(not(feature = "arduino-less"))]
             &mut arduino,
         )?;
-    }
 
+        if let Err(mpsc::error::TrySendError::Closed(_)) = tx.try_send(frame_mat.clone()) {
+            cprintln!("Log", "The graphical receiver was closed. Stopping." => Cyan);
+            break;
+        }
+    }
     camera.close().expect("Error while closing the camera");
     Ok(())
 }
